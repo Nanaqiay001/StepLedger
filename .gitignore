@@ -1,0 +1,25 @@
+# ─── 环境 / 虚拟环境 ───
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# ─── 凭证（绝不进仓库）───
+.env
+
+# ─── 编辑器 ───
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ─── OS ───
+.DS_Store
+Thumbs.db
+
+# ─── 输出 / 归档 ───
+archive/
+output/
