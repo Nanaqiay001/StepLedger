@@ -1,54 +1,42 @@
----
-name: StepLedger
-description: >
-  StepLedger（跬步账）四阶段管线的技术实现 Skill。
-  覆盖 collect → synthesize → render → display 全流程，
-  包括数据源适配器、AI Provider 对接、输出渠道和 cron 编排。
-  当需要实现或修改管线中任何阶段的代码时触发此 Skill。
----
+# StepLedger — Skill
 
-# StepLedger — 技术实现 Skill
+## 类型与适用场景
 
-## 总体管线
+- **类型**: Workflow
+- **适用场景**: 
+- **创建日期**: 
 
-```mermaid
-sequenceDiagram
-    participant DS as 📥 数据源<br/>AliPay / WeChat / 手动
-    participant C as 🔍 采集 Collect
-    participant S as 🧠 理解 Synthesize
-    participant R as ✨ 生成 Render
-    participant D as 📤 输出 Display
+## 目标
 
-    DS->>C: 原始账单 / 消息
-    activate C
-    C->>S: RawTransaction[]
-    deactivate C
-    activate S
-    Note over S: 聚合近况 + 目标对比
-    S->>R: FinancialContext
-    deactivate S
-    activate R
-    Note over R: AI 场景 Prompt
-    R->>D: Insight (文本/图片)
-    deactivate R
-    activate D
-    D->>D: 展示 + 归档 → DisplayResult
-    deactivate D
-```
+给定一个收支素材，自动完成：读取该素材内用户的收支以及余额 → 让 AI 结合目标综合评估最近开支是否合理，离目标还有多远 → 归档当天情况与描述。归档连成视觉编年史。
 
-## 扩展模式
+## 验收标准
 
-- **数据源**：在 `collect/adapters/` 下新增适配器，继承 `BaseAdapter`
-- **AI Provider**：在 `render/providers/` 下新增 provider，继承 `BaseProvider`
-- **输出渠道**：在 `display/channels/` 下新增渠道，继承 `BaseChannel`
+一个无上下文的 agent 拿到以下标准即可判断任务是否完成：
 
-## 运行入口
+1. 产出物落盘：当天日期目录下同时存在 **总结图表** 以及 **目标里程碑** 文档是否更新。
+2. 产出内容可合理对应最近时间段的真实近况。
+4. 全程无人值守即可完成；
 
-- `scripts/daily_run.py` — cron 每日触发入口
-- 手动调试：`python -m step_ledger.pipeline`
+## 可用资源与边界
 
-## 关键约束
+### 可用资源
+### 边界
 
-1. 凭证走 `.env`，不进仓库
-2. daily prompt 和输出归档到 `archive/YYYY-MM-DD/` 目录
-3. 每个阶段可独立替换和测试
+## Collector CLI（未实现）
+
+## Synthesize CLI（未实现）
+
+## step-ledger run（one-shot，供 crontab）
+
+### 定时任务与日志调试（workspace）
+
+## step-ledger display（本地图直显）
+
+## 方法论建议（非硬约束）
+
+## 降级行为（必须覆盖）
+
+## 输出规格
+
+## 已知陷阱
