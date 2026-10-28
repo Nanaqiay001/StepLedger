@@ -27,7 +27,7 @@ def test_only_the_run_date_is_collected(tmp_path: Path) -> None:
     result = collect(tmp_path / DATE, _inbox(tmp_path), DATE)
 
     assert len(result.files) == 1
-    assert result.files[0].name.startswith("20261028-")
+    assert result.files[0].name == "20261028.txt"
     assert "入账人民币15.00元" in result.files[0].read_text(encoding="utf-8")
     assert result.skipped == []
 
@@ -41,6 +41,38 @@ def test_same_source_is_idempotent(tmp_path: Path) -> None:
 
     assert len(first.added) == 1
     assert second.added == []
+
+
+def test_source_file_appended_same_day_keeps_one_snapshot(tmp_path: Path) -> None:
+    """快捷指令当天追加内容时，素材夹只留最新快照，不把同一笔算两遍。"""
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    source = inbox / "20261028.txt"
+    materials = tmp_path / DATE
+    source.write_text("入账 15\n", encoding="utf-8")
+    collect(materials, inbox, DATE)
+
+    source.write_text("入账 15\n支付 21\n", encoding="utf-8")
+    result = collect(materials, inbox, DATE)
+
+    assert len(result.files) == 1
+    assert len(result.added) == 1
+    assert "支付 21" in (materials / "20261028.txt").read_text(encoding="utf-8")
+
+
+def test_legacy_hashed_copies_are_cleaned(tmp_path: Path) -> None:
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    (inbox / "20261028.txt").write_text("入账 15\n支付 21\n", encoding="utf-8")
+    materials = tmp_path / DATE
+    materials.mkdir(parents=True)
+    legacy = materials / "20261028-50ba9072.txt"
+    legacy.write_text("入账 15\n", encoding="utf-8")
+
+    result = collect(materials, inbox, DATE)
+
+    assert not legacy.exists()
+    assert [p.name for p in result.files] == ["20261028.txt"]
 
 
 def test_iso_date_in_name_is_understood(tmp_path: Path) -> None:
@@ -95,7 +127,7 @@ def test_pipeline_reads_configured_source(tmp_path: Path, monkeypatch) -> None:
     result = run(date=DATE, config=cfg, echo=False)
 
     names = [p.name for p in cfg.materials_for(DATE).iterdir() if p.name != "profile.md"]
-    assert any(name.startswith("20261028-") for name in names)
+    assert "20261028.txt" in names
     assert result.judgment is not None
     assert "入账人民币15.00元" in result.judgment.prompt
 

@@ -1,7 +1,10 @@
 """素材夹适配器：把被快捷指令自动写入的文件夹（例如 iCloud 里的账单记录）收进当天素材。
 
 只挑文件、不解读内容。归属日期优先看文件名里的 `20261028` / `2026-10-28`，
-文件名没有日期时才看修改时间。落盘沿用「原名-内容哈希」约定，同日重复收不会产生副本。
+文件名没有日期时才看修改时间。
+
+素材夹里的文件常常一天内被反复追加，所以按**原文件名覆盖**：同一份源文件当天
+只有最新快照，不会因为内容变了就在素材夹里多出一份副本。
 """
 
 from __future__ import annotations
@@ -12,9 +15,10 @@ from pathlib import Path
 
 from ..base import BaseAdapter
 from ...shared.types import CollectResult
-from .manual import READABLE_SUFFIXES, material_files, store_file
+from .manual import READABLE_SUFFIXES, material_files
 
 DATE_IN_NAME = re.compile(r"(20\d{2})-?(\d{2})-?(\d{2})")
+LEGACY_VERSION = re.compile(r"^(?P<stem>.+)-[0-9a-f]{8}(?P<suffix>\.[^.]+)$")
 
 
 class FolderAdapter(BaseAdapter):
@@ -48,7 +52,7 @@ class FolderAdapter(BaseAdapter):
                 result.skipped.append(f"{path.name}: 不支持的格式")
                 continue
             try:
-                target = store_file(path, materials_dir)
+                target = self._store_latest(path, materials_dir)
             except OSError as exc:
                 result.skipped.append(f"{path.name}: 读取失败（{exc}）")
                 continue
@@ -69,6 +73,25 @@ class FolderAdapter(BaseAdapter):
             return datetime.fromtimestamp(path.stat().st_mtime).date().isoformat()
         except OSError:
             return ""
+
+    def _store_latest(self, source: Path, materials_dir: Path) -> Path | None:
+        """按原文件名写当天最新快照；内容没变则跳过（幂等）。"""
+        data = source.read_bytes()
+        target = materials_dir / f"{source.stem}{source.suffix.lower()}"
+        if target.is_file() and target.read_bytes() == data:
+            return None
+        self._drop_hashed_versions(source, materials_dir)
+        target.write_bytes(data)
+        return target
+
+    @staticmethod
+    def _drop_hashed_versions(source: Path, materials_dir: Path) -> None:
+        """清掉旧写法（`原名-哈希`）留下的同源副本，避免旧版本和新快照同时进 prompt。"""
+        stem, suffix = source.stem, source.suffix.lower()
+        for path in materials_dir.iterdir():
+            match = LEGACY_VERSION.match(path.name)
+            if path.is_file() and match and match["stem"] == stem and match["suffix"] == suffix:
+                path.unlink(missing_ok=True)
 
 
 def collect(materials_dir: Path, source_dir: str | Path, date: str) -> CollectResult:
