@@ -16,6 +16,11 @@
 - `scripts/privacy_scan.py`：API key / 手机号 / 邮箱 / 本机路径 / `.env` 误提交检查
 - 测试：`test_pipeline` / `test_collect` / `test_judge` / `test_render` / `test_profile` / `test_privacy`，36 项全过；隐私扫描零匹配
 - `.env.example` 增加 `JUDGE_BASE_URL`
+- 自动素材夹：`FolderAdapter` 按日期（文件名 `20261028` / `2026-10-28`，否则文件修改时间）只收当天文件；
+  `COLLECT_SOURCE_DIRS`（逗号分隔）+ `--source` 接入管线，与手动投递落同一个 `materials/YYYY-MM-DD/`
+- 采集层抽出 `store_file` / `material_files`，手动与素材夹共用「原名-内容哈希」落盘，两个来源都幂等
+- 新增 `tests/test_source_folder.py`（只收当天 / 幂等 / 日期回退 / 缺目录 / 配置与覆盖），45 项全过
+- `.env.example` 增加 `COLLECT_SOURCE_DIRS`（留空 = 只用手动投递）
 - 文档同步：README 快速开始改为实际可用命令、RFC 勾掉实现清单、test.md 补测试清单、skill 填上 collect/judge/运行命令
 
 - 脚手架重构：管线调整为 采集 → 判断 → 渲染（原为四阶段：collect → synthesize → render → display）
@@ -54,3 +59,6 @@
   规避：用 `uv pip install .`（非可编辑）或 `PYTHONPATH=src`；pytest 里已配 `pythonpath = ["src"]`。
 - 本机直连 PyPI 失败时，用 `UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple`。
 - 层间以文件为界后，测试可以直接断言归档产物，不需要 mock 层与层之间的调用。
+- 快捷指令写素材夹这件事，最好让「归属哪一天」由文件名决定（`YYYYMMDD`）：文件系统时间会被同步/拷贝改掉，
+  改天补跑时按 mtime 分天会把昨天的账算进今天。
+- iCloud 这类个人路径只放 `.env`（gitignored），仓库里只出现 `~/Library/.../<素材夹名>` 这种占位写法。

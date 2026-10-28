@@ -52,6 +52,10 @@ cp .env.example .env
 # 或者投一个账单文件
 .venv/bin/python scripts/daily_run.py --file ~/Downloads/bill.md
 
+# 想每天自动收一个素材夹（例如快捷指令写进 iCloud 的银行记录）：
+# .env 里加一行 COLLECT_SOURCE_DIRS=~/Library/Mobile Documents/com~apple~CloudDocs/<素材夹名>
+.venv/bin/python scripts/daily_run.py --stage collect
+
 # 查看归档
 ls materials/2026-10-28 archive/2026-10-28
 ```

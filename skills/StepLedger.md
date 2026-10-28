@@ -35,6 +35,7 @@ description: >
 
 - `materials/profile.md` — 目标 / 当前存款 / 偏好，跨天状态的单一事实源
 - `materials/YYYY-MM-DD/` — 当天素材（账单、截图、随手记、转发消息）
+- `COLLECT_SOURCE_DIRS` 指向的自动素材夹 — 快捷指令等一直往里写，跑采集时自动收当天那份
 - `archive/YYYY-MM-DD/` — 判断结果、daily prompt 与渲染产物
 - `.env` — provider、模型、目录等配置（`.env.example` 为 fake 占位）
 
@@ -56,6 +57,22 @@ python scripts/daily_run.py --stage collect --file ~/Downloads/bill.md
 
 - 素材落 `materials/YYYY-MM-DD/`，文件名带内容哈希，同一天重复投递不会产生副本
 - 只收 `.md` / `.txt` / `.csv` / `.json` 等文本；图片等暂跳过，并在结果里注明
+
+### 自动素材夹（快捷指令 → iCloud）
+
+快捷指令每天把银行短信/记账写进一个文件夹（文件名常用 `YYYYMMDD`），把它配成自动素材夹，
+每次跑管线就会自动收当天那份：
+
+```bash
+# .env（gitignored）里写一行；多个素材夹用逗号分隔
+COLLECT_SOURCE_DIRS=~/Library/Mobile Documents/com~apple~CloudDocs/<素材夹名>
+
+python scripts/daily_run.py --stage collect          # 自动收当天素材
+python scripts/daily_run.py --stage collect --source ~/Downloads/bill-inbox  # 临时换一个
+```
+
+- 归属日期优先看文件名里的 `20261028` / `2026-10-28`，没有才看修改时间；只收当天
+- 素材夹不存在或当天没素材，只在 `skipped` 里注明，不中断管线，也不编造内容
 
 ## 判断（judge）
 

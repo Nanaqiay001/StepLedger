@@ -92,7 +92,7 @@ src/step_ledger/
 - [x] 类型定义（`shared/types.py`：`Judgment`、`CollectResult`、`RenderResult`、`PipelineResult`）
 - [x] 配置模块（`shared/config.py` + 素材/归档路径约定）
 - [x] `materials/profile.md` 约定（目标 / 存款 / 偏好）与读取逻辑
-- [x] 手动素材适配器（一段文字 / 一个文件 / 一个目录 → 当天素材）
+- [x] 素材来源适配器（手动：一段文字 / 一个文件 / 一个目录；素材夹：快捷指令写入的目录按日期只收当天）
 - [x] Stub 判断层（不调模型，返回固定语气模板）
 - [x] 控制台渲染渠道（`report.md` + `milestones.md` + 终端直显）
 - [x] 管线编排（`pipeline.run`，各层可单独重跑）
@@ -104,6 +104,8 @@ src/step_ledger/
 
 - 入口：`scripts/daily_run.py`（cron 兜底）、`python -m step_ledger`、`step-ledger`（安装后）
 - 分阶段：`--stage collect|judge|render`，用于补投素材与断点续跑
+- 自动素材夹：`COLLECT_SOURCE_DIRS`（逗号分隔，可指向 iCloud 等被快捷指令写入的目录）；
+  `--source` 可临时覆盖。文件归属日期优先取文件名里的 `20261028` / `2026-10-28`，没有才看修改时间
 - `judgment.meta.progress` 记录当天 target / savings / percent，`milestones.md` 从历史
   `judgment.json` 里汇总进度
 - 真实 provider 只需 `JUDGE_PROVIDER=openai` + `JUDGE_API_KEY`，其余走 `.env` 默认值
