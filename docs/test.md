@@ -4,9 +4,9 @@
 
 ## 核心原则
 
-管线四阶段（collect → synthesize → render → display）的测试优先级：
+管线（collect → judge → render）的测试优先级：
 
-1. **契约测试最重要** — 每个阶段的输出必须满足下一阶段的输入契约
+1. **契约测试最重要** — 每一层的输出必须满足下一层的输入契约
 2. **冒烟测试保底线** — 全管线端到端跑通 = 系统可用
 3. **单模块测试按需加** — 逻辑复杂时才为单个模块写细粒度测试
 
@@ -14,23 +14,24 @@
 
 ### Layer 1: 冒烟测试（最高优先级）
 
-- `tests/test_pipeline.py` — 全管线端到端：stub 数据源 → 聚合 → stub AI → 控制台输出
+- `tests/test_pipeline.py` — 端到端：固定素材 fixture → stub 判断 → 控制台渲染 → 断言按日期归档
 - 每次提交必过，跑不通 = 不能合
 
 ### Layer 2: 契约测试
 
-验证阶段间数据类型正确传递：
+验证层间数据正确传递：
 
 | 契约 | 验证什么 |
 |------|----------|
-| collect → synthesize | `collect()` 输出的每条记录符合 `RawTransaction` 结构 |
-| synthesize → render | `synthesize()` 输出符合 `FinancialContext` 结构 |
-| render → display | `render()` 输出符合 `Insight` 结构 |
+| collect → judge | 素材目录存在、至少一个文件可读、路径带当天日期 |
+| judge → render | `Judgment` 的 `summary` / `advice` 非空，且不是纯数字罗列 |
+| render → 用户 | 产物写入 `archive/YYYY-MM-DD/`，或控制台有非空输出 |
 
 ### Layer 3: 单模块测试（按需）
 
 随模块实现复杂度增长再补，不预设。典型场景：
-- 聚合逻辑的边界条件（零交易、跨日、大额判定）
+- 判断层边界条件（无素材、素材乱码、超长素材）
+- 采集层落盘路径与重名处理
 - 配置读取的默认值和类型转换
 
 ## Integration tests（依赖凭证，opt-in）
@@ -41,9 +42,9 @@
 
 ## 测试数据
 
-- 固定 fixture 放 `tests/fixtures/`，用 JSON 格式
-- 每个 fixture 文件对应一个场景（正常日、零收入日、大额支出日等）
-- AI 输出不做精确匹配，只验结构完整性 + 必填字段非空
+- 固定素材 fixture 放 `tests/fixtures/`，按场景分目录（正常日、只有支出日、空素材日等）
+- 素材用纯文本 / markdown，贴近真实输入
+- AI 输出不做精确匹配，只验结构完整性 + 必填字段非空 + 不是空话套话
 
 ## 隐私验证（公开仓库强制）
 

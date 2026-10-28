@@ -1,40 +1,39 @@
 # StepLedger 跬步账
 
-> 你距离100万有多远？每天通过收支记录采集，由 AI 每日解读收支是否偏离目标，让你每天离小目标近一点，最后攒成 100 万编年史。
+> 你距离 100 万有多远？每天把各方收支素材收进来，让 AI 说一句"最近钱花得怎么样、下一步怎么走"，悄悄攒成 100 万编年史。
+
+## 设计取向
+
+**定性，不定量。** 不做精确对账，不做预算超支判定。AI 给的是"最近花钱是什么感觉"和"可以怎么调"，不是一张损益表——但必须有温度，说人话。
 
 ## 总体管线
 
 ```mermaid
 sequenceDiagram
-    participant DS as 📥 数据源<br/>AliPay / WeChat / 手动
-    participant C as 🔍 采集 Collect
-    participant S as 🧠 理解 Synthesize
-    participant R as ✨ 生成 Render
-    participant D as 📤 输出 Display
+    participant DS as 📥 素材来源<br/>账单 / 截图 / 随手记
+    participant C as 🔍 采集层
+    participant M as 📁 素材文件
+    participant J as 🧠 判断层
+    participant R as ✨ 渲染层
 
     DS->>C: 原始账单 / 消息
     activate C
-    C->>S: RawTransaction[]
+    C->>M: 落盘成当天素材文件夹
     deactivate C
-    activate S
-    Note over S: 聚合近况 + 目标对比
-    S->>R: FinancialContext
-    deactivate S
+    activate J
+    M->>J: 读取素材
+    J->>R: 花销总结 + 理财建议
+    deactivate J
     activate R
-    Note over R: AI 场景 Prompt
-    R->>D: Insight (文本/图片)
+    R->>R: 可视化 + 归档
     deactivate R
-    activate D
-    D->>D: 展示 + 归档
-    deactivate D
 ```
 
-四个阶段职责单一、可独立替换：
+各层职责单一、可独立替换，层间以**文件**为界：
 
-1. **采集（collect）** — 从多个数据源适配器获取原始收支数据
-2. **理解（synthesize）** — 聚合原始数据为结构化的近况上下文
-3. **生成（render）** — AI 根据目标和上下文生成解读
-4. **输出（display）** — 将解读结果输出给用户并归档
+1. **采集层（collect）** — 从各方收拢素材，只落成文件，不做解读
+2. **判断层（judge）** — 读素材，产出「最近花销总结 + 理财建议」，仅供参考，重温度不重严谨
+3. **渲染层（render）** — 把判断结果可视化（终端 / 图片 / 网页），并归档
 
 ## 快速开始
 

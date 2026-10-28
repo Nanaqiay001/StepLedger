@@ -6,84 +6,112 @@
 
 ```mermaid
 sequenceDiagram
-    participant DS as 📥 数据源<br/>AliPay / WeChat / 手动
-    participant C as 🔍 采集 Collect
-    participant S as 🧠 理解 Synthesize
-    participant R as ✨ 生成 Render
-    participant D as 📤 输出 Display
+    participant DS as 📥 素材来源<br/>账单 / 截图 / 随手记
+    participant C as 🔍 采集层
+    participant M as 📁 素材文件
+    participant J as 🧠 判断层
+    participant R as ✨ 渲染层
 
-    DS->>C: 原始账单 / 消息
+    DS->>C: 原始账单 / 消息 / 手动输入
     activate C
-    C->>S: RawTransaction[]
+    C->>M: 落盘成当天素材文件夹
     deactivate C
-    activate S
-    Note over S: 聚合近况 + 目标对比
-    S->>R: FinancialContext
-    deactivate S
+    activate J
+    M->>J: 读取素材
+    J->>R: Judgment<br/>花销总结 + 理财建议
+    deactivate J
     activate R
-    Note over R: AI 场景 Prompt
-    R->>D: Insight (文本/图片)
+    R->>R: 可视化 + 归档 → RenderResult
     deactivate R
-    activate D
-    D->>D: 展示 + 归档 → DisplayResult
-    deactivate D
 ```
 
-四阶段管线，每阶段职责单一、可独立替换。阶段间通过明确的数据类型连接。
+管线：采集只负责收，判断只负责说，渲染只负责给人看。层间以文件为界——采集层的产物是素材文件夹，判断层的输入就是它。
+
+设计取向是**定性，不定量**：架构里不放精确对账、预算阈值、分类报表。判断层允许模糊、允许主观，唯一硬要求是"有温度、说人话、仅供参考"。
+
+## 调度归属：Skill 定流程，Agent 定时间
+
+skill 不会自己定时，它只能被调用。所以时间这件事必须交给宿主：
+
+| 职责 | 归属 |
+|------|------|
+| 知道"每天该做什么" | 本 skill（流程、口味、归档约定） |
+| 决定"什么时候做" | 宿主 agent 的定时 / 心跳能力 |
+| 无常驻 agent 时兜底 | `scripts/daily_run.py` + 系统 cron（可选） |
+
+skill 只表达一句话："如果宿主有定时能力，请每天在用户偏好的时间调用我一次。"具体时间由宿主决定，本仓库不假设、也不实现调度器。
+
+由此得到三条实现约束：
+
+1. **幂等** — 同一天被调用多次不能产生重复或错乱归档，按 `YYYY-MM-DD` 目录覆盖/追加
+2. **可续跑** — agent 可能中途被打断，任一层单独重跑都应可用
+3. **两入口同一产物** — agent 调用与 cron 调用必须走同一条管线，不写两套逻辑
+
+### 长期状态放哪
+
+目标、当前存款、偏好这类跨天状态，不放数据库，放 `materials/profile.md`。文件是单一事实源：agent 模式读它，cron 模式也读它。能用 agent 自己的记忆就用记忆，需要精确复现的才落文件。
 
 ## 模块结构
 
 ```
 src/step_ledger/
 ├── pipeline.py       # 管线编排
-├── collect/          # 阶段 1: 采集
-│   └── adapters/     # 数据源适配器
-├── synthesize/       # 阶段 2: 理解
-├── render/           # 阶段 3: 生成
+├── collect/          # 层 1: 采集（只落盘，不解读）
+│   └── adapters/     # 素材来源适配器
+├── judge/            # 层 2: 判断（给总结与建议）
 │   └── providers/    # AI Provider 适配层
-├── display/          # 阶段 4: 输出
-│   └── channels/     # 输出渠道
-└── shared/           # 跨模块共享（类型 + 配置）
+├── render/           # 层 3: 渲染（可视化 + 归档）
+│   └── channels/     # 渲染渠道
+└── shared/           # 跨层共享（类型 + 配置 + 路径）
 ```
 
-### 各模块职责
+### 各层职责
 
-| 模块 | 职责 | 输入 | 输出 |
-|------|------|------|------|
-| `collect` | 从数据源适配器获取原始收支 | 外部数据源 | `list[RawTransaction]` |
-| `synthesize` | 聚合原始数据为近况上下文 | `list[RawTransaction]` + `Goal` | `FinancialContext` |
-| `render` | AI 根据目标和上下文生成解读 | `FinancialContext` | `Insight` |
-| `display` | 输出结果给用户并归档 | `Insight` | `DisplayResult` |
-| `pipeline` | 编排四阶段顺序执行 | 配置 | `PipelineResult` |
+| 层 | 职责 | 输入 | 输出 |
+|----|------|------|------|
+| `collect` | 把各方素材收拢成文件 | 外部源 / 手动输入 | 素材文件夹 `materials/YYYY-MM-DD/` |
+| `judge` | 读素材，产出定性总结与建议 | 素材文件夹 | `Judgment`（花销总结 + 理财建议） |
+| `render` | 把 `Judgment` 可视化并归档 | `Judgment` | 渲染产物（文本/图片/网页）+ 归档路径 |
+| `pipeline` | 顺序编排各层 | 配置 | `PipelineResult` |
+
+### 层间契约
+
+- **collect → judge**：文件系统。素材目录存在且至少有一个可读文件
+- **judge → render**：`Judgment` 数据类型，`summary` 与 `advice` 均非空
+- **render → 用户**：产物落盘到 `archive/YYYY-MM-DD/`，或直接输出到终端
 
 ### 扩展点
 
-- **数据源适配器**：继承 `BaseAdapter`，实现 `collect()` 方法
-- **AI Provider**：继承 `BaseProvider`，实现 `generate()` 方法
-- **输出渠道**：继承 `BaseChannel`，实现 `send()` 方法
+- **素材来源**：继承 `BaseAdapter`，实现 `collect() -> Path`（返回当天素材目录）
+- **AI Provider**：继承 `BaseProvider`，实现 `judge(materials_dir: Path) -> Judgment`
+- **渲染渠道**：继承 `BaseChannel`，实现 `render(judgment: Judgment) -> Path | str`
 
 ## 当前实现状态
 
 - [x] 项目脚手架（目录结构、文档骨架、环境配置）
-- [ ] 类型定义（`shared/types.py`）
-- [ ] 配置模块（`shared/config.py`）
-- [ ] 手动输入适配器
-- [ ] 聚合逻辑
-- [ ] Stub AI Provider
-- [ ] 控制台输出渠道
+- [ ] 类型定义（`shared/types.py`：`Judgment`、`RenderResult`、`PipelineResult`）
+- [ ] 配置模块（`shared/config.py` + 素材/归档路径约定）
+- [ ] `materials/profile.md` 约定（目标 / 存款 / 偏好）与读取逻辑
+- [ ] 手动素材适配器（把一段文字落成当天素材文件）
+- [ ] Stub 判断层（不调模型，返回固定语气模板）
+- [ ] 控制台渲染渠道
 - [ ] 管线编排
 - [ ] cron 入口脚本
+- [ ] 真实 AI Provider
 
 ## 未决问题
 
-1. 数据持久化方案：SQLite vs JSON 文件 vs 其他
-2. AI Provider 首选：OpenAI vs Gemini vs 其他
-3. 消息转发采集的具体协议
+1. 素材格式统一到什么程度（纯文本 / markdown / 图片单独放）
+2. 判断层 provider 选型
+3. 图形化渲染方案：HTML→图片 vs 终端卡片
+4. 素材保留策略（只留最近 N 天 vs 永久）
 
 ## 附录：Alternatives Considered & Why
 
 | 决策点 | 选择 | 被否决方案 | 原因 |
 |--------|------|-----------|------|
-| 语言 | Python | TypeScript | cron 工具场景，Python 生态更成熟 |
-| 架构 | 四阶段管线 | 单体脚本 | 各阶段需独立替换/测试 |
-| 适配器模式 | 基类继承 | 硬编码 if-else | 数据源/输出渠道会持续增加 |
+| 语言 | Python | TypeScript | agent skill 场景下脚本依赖轻，Python 生态更成熟 |
+| 架构 | 分层管线 | 单体脚本 | 各层职责差异大，需独立替换/测试 |
+| 层间通信 | 素材文件夹 + 轻量 dataclass | 全程强类型内存对象 | 素材天然异构、来源不固定，落盘更好扩展也能回放 |
+| 解读风格 | 定性 + 有温度 | 精确记账 / 预算管控 | 精确对账成本高、体验冷，用户坚持不下来 |
+| 适配器模式 | 基类继承 | 硬编码 if-else | 素材来源/渲染渠道会持续增加 |
