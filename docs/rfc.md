@@ -105,7 +105,8 @@ src/step_ledger/
 - 入口：`scripts/daily_run.py`（cron 兜底）、`python -m step_ledger`、`step-ledger`（安装后）
 - 分阶段：`--stage collect|judge|render`，用于补投素材与断点续跑
 - 自动素材夹：`COLLECT_SOURCE_DIRS`（逗号分隔，可指向 iCloud 等被快捷指令写入的目录）；
-  `--source` 可临时覆盖。文件归属日期优先取文件名里的 `20261028` / `2026-10-28`，没有才看修改时间
+  `--source` 可临时覆盖。文件归属日期优先取文件名里的 `20261028` / `2026-10-28`，没有才看修改时间；
+  同名源文件按原文件名覆盖成当天最新快照（源文件当天追加不会变成多份素材）
 - `judgment.meta.progress` 记录当天 target / savings / percent，`milestones.md` 从历史
   `judgment.json` 里汇总进度
 - 真实 provider 只需 `JUDGE_PROVIDER=openai` + `JUDGE_API_KEY`，其余走 `.env` 默认值

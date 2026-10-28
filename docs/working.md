@@ -23,8 +23,11 @@
 - `.env.example` 增加 `JUDGE_BASE_URL`
 - 自动素材夹：`FolderAdapter` 按日期（文件名 `20261028` / `2026-10-28`，否则文件修改时间）只收当天文件；
   `COLLECT_SOURCE_DIRS`（逗号分隔）+ `--source` 接入管线，与手动投递落同一个 `materials/YYYY-MM-DD/`
+- 修复：快捷指令当天追加内容会让同一源文件产生多份快照，模型把同一笔算两遍；
+  素材夹改为按原文件名覆盖当天最新快照，并清掉旧 `原名-哈希` 副本
+- 真实模型（DeepSeek `deepseek-flash`）端到端跑通：素材 1 份、`degraded=false`，判断内容与账单对得上
 - 采集层抽出 `store_file` / `material_files`，手动与素材夹共用「原名-内容哈希」落盘，两个来源都幂等
-- 新增 `tests/test_source_folder.py`（只收当天 / 幂等 / 日期回退 / 缺目录 / 配置与覆盖），45 项全过
+- 新增 `tests/test_source_folder.py`（只收当天 / 幂等 / 日期回退 / 缺目录 / 配置与覆盖），47 项全过
 - `.env.example` 增加 `COLLECT_SOURCE_DIRS`（留空 = 只用手动投递）
 - 文档同步：README 快速开始改为实际可用命令、RFC 勾掉实现清单、test.md 补测试清单、skill 填上 collect/judge/运行命令
 
