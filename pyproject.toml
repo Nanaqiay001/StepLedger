@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "step-ledger"
+version = "0.1.0"
+description = "把每天的收支素材变成一句有温度的复盘"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+step-ledger = "step_ledger.pipeline:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/step_ledger"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q -m 'not integration'"
+markers = [
+    "integration: 需要真实凭证的测试，默认跳过（pytest -m integration 单独触发）",
+]
