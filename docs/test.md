@@ -50,6 +50,19 @@
 | `tests/test_profile.py` | 金额解析（万/k/逗号）、字段解析、模板创建 |
 | `tests/test_privacy.py` | 仓库隐私扫描零匹配 |
 
+## CI（GitHub Actions）
+
+配置在 `.github/workflows/ci.yml`，触发条件：任意分支 push、PR、手动触发。
+
+| Job | 内容 | 失败意味着 |
+|-----|------|-----------|
+| `pytest / Python 3.11–3.14` | `python -m pytest`（默认排除 integration） | 有测试没过 |
+| `隐私扫描` | `python scripts/privacy_scan.py` | 仓库里混进了凭证 / 私人信息 / 本机路径 |
+| `安装冒烟` | `pip install .` 后用 `step-ledger` 跑完整管线，断言归档产物存在 | 打包配置或入口坏了 |
+
+CI 只用 `actions/checkout` + `actions/setup-python`，不跑 uv：流水线要验的是
+「干净检出 + 纯 pytest」，本机的 uv 安装姿势不参与。integration 测试需要真实 key，不进 CI。
+
 ## Integration tests（依赖凭证，opt-in）
 
 - 标记 `@pytest.mark.integration`，默认不跑

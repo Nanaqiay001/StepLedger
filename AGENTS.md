@@ -12,6 +12,7 @@ StepLedger跬步账：把各方的收支素材收进来，由 AI 做一次有温
 ## 项目结构
 
 - `docs/` — prd / rfc / test / working（持久文档）
+- `.github/workflows/` — CI 门禁（pytest 矩阵 / 隐私扫描 / 安装冒烟）
 - `src/step_ledger/` — 可复用 Python 模块
 - `scripts/` — 供 agent / cron 调用的执行入口
 - `tests/` — unit（offline）/ integration（opt-in）

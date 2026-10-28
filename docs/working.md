@@ -4,6 +4,11 @@
 
 ### 2026-10-28
 
+- **CI 门禁**：新增 `.github/workflows/ci.yml`，push / PR / 手动触发，三个 job——
+  pytest 矩阵（Python 3.11–3.14）、隐私扫描、安装冒烟（`pip install .` 后用 `step-ledger` 跑完整管线）
+- 本地按 CI 场景验证：干净检出复制副本里 45 项测试全过、隐私扫描零匹配；全新 venv 安装后入口能产出 `report.md`
+- README 加 CI 徽章与门禁说明，`docs/test.md` 补 CI 一节，AGENTS.md 项目结构加 `.github/workflows/`
+
 - **下一阶段实现：MVP 管线跑通**（采集 → 判断 → 渲染）
 - 新增 `pyproject.toml`（hatchling + `step-ledger` 入口 + pytest 配置），零运行时依赖
 - `shared/`：`types.py`（Judgment / CollectResult / RenderContext / RenderResult / PipelineResult）、`config.py`（`.env` 轻量读取 + 默认值）、`profile.py`（目标 / 存款 / 偏好解析，缺文件写模板）
@@ -62,3 +67,6 @@
 - 快捷指令写素材夹这件事，最好让「归属哪一天」由文件名决定（`YYYYMMDD`）：文件系统时间会被同步/拷贝改掉，
   改天补跑时按 mtime 分天会把昨天的账算进今天。
 - iCloud 这类个人路径只放 `.env`（gitignored），仓库里只出现 `~/Library/.../<素材夹名>` 这种占位写法。
+- CI 不复用本机 uv 流程：uv editable 在 3.13+ 的隐藏 `.pth` 坑只影响开发机，流水线用
+  `setup-python + pip` 验「干净检出 + 纯 pytest」更稳；公开仓库的隐私扫描 pytest 里有一份、CI 里再单列一个 job，
+  前者让开发者本地就能发现，后者让发布门禁在 Actions 页面一眼可见。

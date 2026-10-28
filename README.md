@@ -1,5 +1,7 @@
 # StepLedger 跬步账
 
+[![CI](https://github.com/Nanaqiay001/StepLedger/actions/workflows/ci.yml/badge.svg)](https://github.com/Nanaqiay001/StepLedger/actions/workflows/ci.yml)
+
 > 你距离 100 万有多远？每天把各方收支素材收进来，让 AI 说一句"最近钱花得怎么样、下一步怎么走"，悄悄攒成 100 万编年史。
 
 ## 设计取向
@@ -94,6 +96,9 @@ uv pip install pytest
 .venv/bin/python -m pytest          # 默认跳过 integration
 .venv/bin/python scripts/privacy_scan.py
 ```
+
+CI 跑的就是这两条命令（外加 Python 3.11–3.14 矩阵和一次 `pip install .` 安装冒烟），
+配置在 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)。
 
 ## 文档
 
