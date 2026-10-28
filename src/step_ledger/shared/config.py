@@ -17,6 +17,7 @@ ENV_KEYS = (
     "PIPELINE_DAILY_RUN_TIME",
     "PIPELINE_LOOKBACK_DAYS",
     "COLLECT_MATERIALS_DIR",
+    "COLLECT_SOURCE_DIRS",
     "RENDER_CHANNELS",
     "RENDER_ARCHIVE_DIR",
 )
@@ -55,6 +56,7 @@ class Config:
     root: Path
     materials_dir: Path
     archive_dir: Path
+    source_dirs: tuple[Path, ...]
     provider: str
     api_key: str
     model: str
@@ -80,6 +82,7 @@ class Config:
 
         materials = _resolve(root_path, os.getenv("COLLECT_MATERIALS_DIR"), "materials")
         archive = _resolve(root_path, os.getenv("RENDER_ARCHIVE_DIR"), "archive")
+        source_dirs = _resolve_list(root_path, os.getenv("COLLECT_SOURCE_DIRS"))
         channels = tuple(
             c.strip() for c in (os.getenv("RENDER_CHANNELS") or "console").split(",") if c.strip()
         )
@@ -87,6 +90,7 @@ class Config:
             root=root_path,
             materials_dir=materials,
             archive_dir=archive,
+            source_dirs=source_dirs,
             provider=(os.getenv("JUDGE_PROVIDER") or "stub").strip().lower(),
             api_key=(os.getenv("JUDGE_API_KEY") or "").strip(),
             model=(os.getenv("JUDGE_MODEL") or "gpt-4o-mini").strip(),
@@ -102,3 +106,15 @@ def _resolve(root: Path, value: str | None, default: str) -> Path:
         return (root / default).resolve()
     path = Path(value).expanduser()
     return path if path.is_absolute() else (root / path).resolve()
+
+
+def _resolve_list(root: Path, value: str | None) -> tuple[Path, ...]:
+    """逗号分隔的目录列表；空值表示没配自动素材夹。"""
+    paths: list[Path] = []
+    for item in (value or "").split(","):
+        item = item.strip()
+        if not item:
+            continue
+        path = Path(item).expanduser()
+        paths.append(path if path.is_absolute() else (root / path).resolve())
+    return tuple(paths)

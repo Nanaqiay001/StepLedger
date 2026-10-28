@@ -11,7 +11,8 @@ import sys
 from datetime import date as date_type
 from pathlib import Path
 
-from .collect.adapters.manual import ManualAdapter
+from .collect.adapters.folder import FolderAdapter
+from .collect.adapters.manual import ManualAdapter, material_files
 from .judge.base import ProviderError
 from .judge.prompt import build_prompt, read_materials
 from .judge.providers.openai_compatible import OpenAICompatibleProvider
@@ -35,6 +36,7 @@ def run(
     root: Path | str | None = None,
     stage: str = "all",
     provider: str | None = None,
+    sources: list[str | Path] | None = None,
     echo: bool = True,
     config: Config | None = None,
 ) -> PipelineResult:
@@ -45,15 +47,11 @@ def run(
     result = PipelineResult(date=run_date, materials_dir=materials_dir, archive_dir=archive_dir, stage=stage)
 
     if stage in ("all", "collect"):
-        collected = ManualAdapter().collect(materials_dir, payload)
+        collected = _collect(cfg, run_date, materials_dir, payload, sources)
         result.skipped.extend(collected.skipped)
     else:
         collected = CollectResult(materials_dir=materials_dir)
-        collected.files = (
-            sorted(p for p in materials_dir.iterdir() if p.is_file() and p.name != "profile.md")
-            if materials_dir.is_dir()
-            else []
-        )
+        collected.files = material_files(materials_dir)
 
     profile = _load_or_create_profile(cfg.profile_path, create=stage in ("all", "judge"))
 
@@ -88,6 +86,24 @@ def _load_or_create_profile(path: Path, *, create: bool) -> Profile:
     return load_profile(path)
 
 
+def _collect(
+    cfg: Config,
+    run_date: str,
+    materials_dir: Path,
+    payload: str | Path | None,
+    sources: list[str | Path] | None,
+) -> CollectResult:
+    """手动投递 + 自动素材夹，都落进当天同一个素材目录。"""
+    merged = ManualAdapter().collect(materials_dir, payload)
+    source_dirs = sources if sources else cfg.source_dirs
+    for source in source_dirs:
+        extra = FolderAdapter(run_date).collect(materials_dir, source)
+        merged.added.extend(extra.added)
+        merged.skipped.extend(extra.skipped)
+    merged.files = material_files(materials_dir)
+    return merged
+
+
 def _judge(cfg: Config, materials_dir: Path, profile: Profile, run_date: str, override: str | None) -> Judgment:
     requested = (override or cfg.provider or "stub").strip().lower()
     try:
@@ -103,7 +119,7 @@ def _judge(cfg: Config, materials_dir: Path, profile: Profile, run_date: str, ov
 
     if not judgment.prompt:
         text, _ = read_materials(materials_dir)
-        judgment.prompt = build_prompt(profile, text, run_date, len(_material_files(materials_dir)))
+        judgment.prompt = build_prompt(profile, text, run_date, len(material_files(materials_dir)))
 
     _stamp_progress(judgment, profile, run_date)
     return judgment
@@ -150,12 +166,6 @@ def _log(archive_dir: Path, message: str) -> None:
         handle.write(message + "\n")
 
 
-def _material_files(materials_dir: Path) -> list[Path]:
-    if not materials_dir.is_dir():
-        return []
-    return sorted(p for p in materials_dir.iterdir() if p.is_file() and p.name != "profile.md")
-
-
 def _fallback_render(judgment: Judgment, ctx: RenderContext) -> RenderResult:
     ctx.archive_dir.mkdir(parents=True, exist_ok=True)
     text = f"# {ctx.date}\n\n最近怎么样：{judgment.summary}\n\n下一步怎么走：{judgment.advice}\n"
@@ -184,6 +194,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--date", help="指定日期（YYYY-MM-DD），默认今天")
     parser.add_argument("--text", help="直接投递一段素材文字")
     parser.add_argument("--file", help="投递一个素材文件或目录")
+    parser.add_argument("--source", action="append", help="额外收一个素材夹（可多次；给了就覆盖 COLLECT_SOURCE_DIRS）")
     parser.add_argument("--stdin", action="store_true", help="从 stdin 读素材")
     parser.add_argument("--root", help="项目根目录，默认当前目录或 STEP_LEDGER_ROOT")
     parser.add_argument("--stage", choices=("all", "collect", "judge", "render"), default="all")
@@ -203,6 +214,7 @@ def main(argv: list[str] | None = None) -> int:
             root=args.root,
             stage=args.stage,
             provider=args.provider,
+            sources=args.source,
             echo=not (args.json or args.no_echo),
         )
     except FileNotFoundError as exc:

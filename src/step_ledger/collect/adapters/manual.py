@@ -15,10 +15,27 @@ TEXT_SUFFIX = ".md"
 READABLE_SUFFIXES = {".md", ".txt", ".markdown", ".csv", ".log", ".json"}
 
 
-def _digest(data: bytes | str) -> str:
+def digest(data: bytes | str) -> str:
     if isinstance(data, str):
         data = data.encode("utf-8")
     return hashlib.sha1(data).hexdigest()[:8]
+
+
+def material_files(materials_dir: Path) -> list[Path]:
+    """当天素材快照：目录下的文件，排除档案本身。"""
+    if not materials_dir.is_dir():
+        return []
+    return sorted(p for p in materials_dir.iterdir() if p.is_file() and p.name != "profile.md")
+
+
+def store_file(source: Path, materials_dir: Path) -> Path | None:
+    """把 source 复制进素材夹，文件名带内容哈希；已存在则返回 None（幂等）。"""
+    data = source.read_bytes()
+    target = materials_dir / f"{source.stem[:24]}-{digest(data)}{source.suffix.lower()}"
+    if target.exists():
+        return None
+    target.write_bytes(data)
+    return target
 
 
 class ManualAdapter(BaseAdapter):
@@ -35,13 +52,13 @@ class ManualAdapter(BaseAdapter):
             else:
                 self._collect_text(str(payload), materials_dir, result)
 
-        result.files = sorted(p for p in materials_dir.iterdir() if p.is_file() and p.name != "profile.md")
+        result.files = material_files(materials_dir)
         return result
 
     def _collect_text(self, text: str, materials_dir: Path, result: CollectResult) -> None:
         if not text.strip():
             return
-        target = materials_dir / f"manual-{_digest(text)}{TEXT_SUFFIX}"
+        target = materials_dir / f"manual-{digest(text)}{TEXT_SUFFIX}"
         if target.exists():
             return
         target.write_text(text.strip() + "\n", encoding="utf-8")
@@ -54,19 +71,23 @@ class ManualAdapter(BaseAdapter):
                 result.skipped.append(f"{source.name}: 不支持的格式")
                 continue
             try:
-                data = source.read_bytes()
+                target = store_file(source, materials_dir)
             except OSError as exc:
                 result.skipped.append(f"{source.name}: 读取失败（{exc}）")
                 continue
-            target = materials_dir / f"{source.stem[:24]}-{_digest(data)}{source.suffix.lower()}"
-            if target.exists():
-                continue
-            target.write_bytes(data)
-            result.added.append(target)
+            if target is not None:
+                result.added.append(target)
 
 
 def collect(materials_dir: Path, payload: str | Path | None = None) -> CollectResult:
     return ManualAdapter().collect(materials_dir, payload)
 
 
-__all__ = ["ManualAdapter", "collect", "READABLE_SUFFIXES"]
+__all__ = [
+    "ManualAdapter",
+    "collect",
+    "digest",
+    "material_files",
+    "store_file",
+    "READABLE_SUFFIXES",
+]
