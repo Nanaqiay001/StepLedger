@@ -64,6 +64,8 @@ ls materials/2026-10-28 archive/2026-10-28
 .venv/bin/python scripts/daily_run.py --stage render
 ```
 
+想把命令装进 PATH（可选）：`uv pip install .`，之后直接用 `step-ledger --text "..."`。
+
 想换成真实模型：把 `.env` 里的 `JUDGE_PROVIDER` 改成 `openai` 并填 `JUDGE_API_KEY`
 （任意 OpenAI 兼容网关都行，改 `JUDGE_BASE_URL`）。模型不可用时会自动退回本地模板，
 并在产物里标注「降级模式」。
