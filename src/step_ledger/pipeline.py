@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import replace
 from datetime import date as date_type
 from pathlib import Path
 
@@ -58,11 +59,13 @@ def run(
     if stage in ("all", "judge"):
         result.judgment = _judge(cfg, materials_dir, profile, run_date, provider)
         result.skipped.extend(result.judgment.meta.get("skipped") or [])
+        profile = _with_judged_savings(profile, result.judgment)
         _write_judgment(result.judgment, archive_dir)
 
     if stage in ("all", "render"):
         if result.judgment is None:
             result.judgment = _read_judgment(archive_dir)
+            profile = _with_judged_savings(profile, result.judgment)
         # 档案可能刚改过：重跑渲染时也要刷新当天的进度快照
         _stamp_progress(result.judgment, profile, run_date)
         if stage == "render":
@@ -84,6 +87,16 @@ def _load_or_create_profile(path: Path, *, create: bool) -> Profile:
     if create:
         return ensure_profile(path)
     return load_profile(path)
+
+
+def _with_judged_savings(profile: Profile, judgment: Judgment) -> Profile:
+    """档案没填存款时，用模型从素材里读到的余额兜底；手填的永远优先。"""
+    if profile.savings is not None:
+        return profile
+    balance = judgment.meta.get("balance")
+    if not isinstance(balance, (int, float)) or isinstance(balance, bool):
+        return profile
+    return replace(profile, savings=int(balance), savings_from_materials=True)
 
 
 def _collect(
@@ -121,7 +134,7 @@ def _judge(cfg: Config, materials_dir: Path, profile: Profile, run_date: str, ov
         text, _ = read_materials(materials_dir)
         judgment.prompt = build_prompt(profile, text, run_date, len(material_files(materials_dir)))
 
-    _stamp_progress(judgment, profile, run_date)
+    _stamp_progress(judgment, _with_judged_savings(profile, judgment), run_date)
     return judgment
 
 

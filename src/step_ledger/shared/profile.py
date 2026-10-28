@@ -34,6 +34,7 @@ class Profile:
     raw: str = ""
     target: int = DEFAULT_TARGET
     savings: int | None = None
+    savings_from_materials: bool = False
     preferred_time: str | None = None
     created: bool = False
 

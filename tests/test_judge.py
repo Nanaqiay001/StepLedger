@@ -42,14 +42,15 @@ def test_stub_without_materials_is_honest(tmp_path: Path) -> None:
 
 
 def test_parse_json_response() -> None:
-    summary, advice = parse_judgment_response('{"summary": "还好", "advice": "少点一次外卖"}')
+    summary, advice, balance = parse_judgment_response('{"summary": "还好", "advice": "少点一次外卖"}')
     assert summary == "还好"
     assert advice == "少点一次外卖"
+    assert balance is None
 
 
 def test_parse_fenced_json_response() -> None:
     raw = '```json\n{"summary": "正常", "advice": "继续"}\n```'
-    assert parse_judgment_response(raw) == ("正常", "继续")
+    assert parse_judgment_response(raw) == ("正常", "继续", None)
 
 
 def test_parse_rejects_non_json() -> None:

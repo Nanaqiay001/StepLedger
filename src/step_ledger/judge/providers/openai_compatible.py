@@ -64,7 +64,7 @@ class OpenAICompatibleProvider(BaseProvider):
             raise ProviderError("返回结构不符合 OpenAI 约定") from exc
 
         try:
-            summary, advice = parse_judgment_response(str(content))
+            summary, advice, balance = parse_judgment_response(str(content))
         except ValueError as exc:
             raise ProviderError(str(exc)) from exc
 
@@ -77,6 +77,8 @@ class OpenAICompatibleProvider(BaseProvider):
                 "model": self.model,
                 "material_count": len(files),
                 "skipped": skipped,
+                # 模型从素材里读到的账户余额；没读到就是 None
+                "balance": balance,
                 # 顺手记下 token 用量，方便对账 / 看这次调用花了多少
                 "usage": data.get("usage") or {},
             },

@@ -37,7 +37,7 @@ class ConsoleChannel(BaseChannel):
             "",
             "## 离目标还有多远",
             f"- 目标：{format_money(ctx.profile.target)}",
-            f"- 当前存款：{format_money(ctx.profile.savings)}",
+            f"- 当前存款：{_savings_text(ctx.profile)}",
             f"- 还差：{'未知' if ctx.profile.distance is None else format_money(ctx.profile.distance)}",
             f"- 进度：{_progress_line(ctx.profile)}",
         ]
@@ -54,7 +54,7 @@ class ConsoleChannel(BaseChannel):
             "# 目标里程碑",
             "",
             f"- 目标：{format_money(ctx.profile.target)}",
-            f"- 当前存款：{format_money(ctx.profile.savings)}",
+            f"- 当前存款：{_savings_text(ctx.profile)}",
             f"- 还差：{'未知' if ctx.profile.distance is None else format_money(ctx.profile.distance)}",
             f"- 进度：{_progress_line(ctx.profile)}",
             "",
@@ -76,6 +76,13 @@ class ConsoleChannel(BaseChannel):
         else:
             lines.append("还在第一天，走两步就有曲线了。")
         return "\n".join(lines) + "\n"
+
+
+def _savings_text(profile: Profile) -> str:
+    text = format_money(profile.savings)
+    if profile.savings is not None and profile.savings_from_materials:
+        return f"{text}（AI 从素材识别）"
+    return text
 
 
 def _progress_line(profile: Profile) -> str:
