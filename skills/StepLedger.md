@@ -138,7 +138,7 @@ python scripts/daily_run.py --json --no-echo
 
 ```bash
 # crontab -e
-0 21 * * * cd /path/to/StepLedger && .venv/bin/python scripts/daily_run.py >> /tmp/step-ledger.log 2>&1
+0 21 * * * cd /path/to/StepLedger && python3 scripts/daily_run.py >> /tmp/step-ledger.log 2>&1
 ```
 
 - 先手动跑通一遍，再挂 crontab
@@ -188,3 +188,7 @@ archive/YYYY-MM-DD/
 - 别假设一定有常驻 agent：cron 兜底必须可用
 - 别在不同入口写两套逻辑，产物必须一致
 - 别把凭证或真实账单提交进仓库
+- 别用裸 `uv run step-ledger`：uv 0.10 + CPython 3.13 会按可编辑方式装包，写出以 `_` 开头的
+  `.pth` 被 `site.py` 跳过，偶尔 `ModuleNotFoundError`；`--with .` / `--reinstall` 也可能复用旧
+  wheel 看不到新代码。统一用 `uv run --no-project scripts/daily_run.py`（无 uv 时用 `python3 scripts/daily_run.py`，
+  脚本自己把 `src/` 加进 path，无外部依赖、跨平台）
