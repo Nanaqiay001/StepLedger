@@ -34,6 +34,22 @@
 - 采集层落盘路径与重名处理
 - 配置读取的默认值和类型转换
 
+## 当前测试清单
+
+```bash
+.venv/bin/python -m pytest        # 默认跳过 integration
+.venv/bin/python scripts/privacy_scan.py
+```
+
+| 文件 | 覆盖 |
+|------|------|
+| `tests/test_pipeline.py` | 端到端、前三行可读、judgment 契约、同日幂等、无素材、自然语言素材、降级、分层续跑 |
+| `tests/test_collect.py` | 文本/文件/目录投递、哈希去重、不支持格式跳过 |
+| `tests/test_judge.py` | stub 口味、空素材、响应解析、缺 key 失败 |
+| `tests/test_render.py` | 报告首三行、进度条、里程碑历史、降级标注、缺档案 |
+| `tests/test_profile.py` | 金额解析（万/k/逗号）、字段解析、模板创建 |
+| `tests/test_privacy.py` | 仓库隐私扫描零匹配 |
+
 ## Integration tests（依赖凭证，opt-in）
 
 - 标记 `@pytest.mark.integration`，默认不跑

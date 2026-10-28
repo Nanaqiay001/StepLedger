@@ -4,6 +4,20 @@
 
 ### 2026-10-28
 
+- **下一阶段实现：MVP 管线跑通**（采集 → 判断 → 渲染）
+- 新增 `pyproject.toml`（hatchling + `step-ledger` 入口 + pytest 配置），零运行时依赖
+- `shared/`：`types.py`（Judgment / CollectResult / RenderContext / RenderResult / PipelineResult）、`config.py`（`.env` 轻量读取 + 默认值）、`profile.py`（目标 / 存款 / 偏好解析，缺文件写模板）
+- `collect/`：`BaseAdapter` + `ManualAdapter`（一段文字 / 文件 / 目录 → `materials/YYYY-MM-DD/`，文件名带内容哈希，重复投递不产生副本）
+- `judge/`：`BaseProvider`、共用 prompt 构建与响应解析、`StubProvider`（本地语气模板）、`OpenAICompatibleProvider`（urllib 直连任意兼容网关）
+- 判断失败 / 未配 key 自动降级到 stub，并在 `judgment.json` 与 `report.md` 标注「降级模式」
+- `render/`：`BaseChannel` + `ConsoleChannel`（`report.md` 前三行说清现状与下一步、`milestones.md` 从历史 judgment 汇总进度）
+- `pipeline.py`：`run()` 支持 `--stage collect|judge|render` 单独重跑；同日覆盖、不新建目录；prompt 必归档
+- 入口：`scripts/daily_run.py`（cron 兜底，自动把 `src` 加入 path）、`python -m step_ledger`、安装后的 `step-ledger`
+- `scripts/privacy_scan.py`：API key / 手机号 / 邮箱 / 本机路径 / `.env` 误提交检查
+- 测试：`test_pipeline` / `test_collect` / `test_judge` / `test_render` / `test_profile` / `test_privacy`，36 项全过；隐私扫描零匹配
+- `.env.example` 增加 `JUDGE_BASE_URL`
+- 文档同步：README 快速开始改为实际可用命令、RFC 勾掉实现清单、test.md 补测试清单、skill 填上 collect/judge/运行命令
+
 - 脚手架重构：管线调整为 采集 → 判断 → 渲染（原为四阶段：collect → synthesize → render → display）
 - 采集层改为以素材文件（夹）为产物，判断层直接以素材目录为输入
 - 判断层输出收敛为「最近花销总结 + 理财建议」，明确仅供参考
@@ -35,3 +49,8 @@
 - 脚手架、实现、验证应分步提交，不要一次塞太多。
 - 层的边界最好落在"文件"上：素材异构、来源不固定，内存强类型会逼着过早统一格式。
 - 先定口味再定结构：定性还是定量决定了要不要分类报表、预算阈值这些模块。
+- uv 0.10.11 的 editable 安装会写 `_editable_impl_*.pth`（下划线开头），CPython 3.13+ 的
+  `site.py` 会跳过隐藏 `.pth`，导致 `uv pip install -e .` 后 `import step_ledger` 失败。
+  规避：用 `uv pip install .`（非可编辑）或 `PYTHONPATH=src`；pytest 里已配 `pythonpath = ["src"]`。
+- 本机直连 PyPI 失败时，用 `UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple`。
+- 层间以文件为界后，测试可以直接断言归档产物，不需要 mock 层与层之间的调用。

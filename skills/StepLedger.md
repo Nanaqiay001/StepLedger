@@ -45,9 +45,30 @@ description: >
 - 不碰资金：不转账、不支付、不代填任何金融表单
 - 凭证只走 `.env`，公开仓库零匹配
 
-## Collector CLI（未实现）
+## 素材投递（collect）
 
-## Synthesize CLI（未实现）
+把一段话或一个文件落成当天素材，不触发判断：
+
+```bash
+python scripts/daily_run.py --stage collect --text "午饭 35，打车 22"
+python scripts/daily_run.py --stage collect --file ~/Downloads/bill.md
+```
+
+- 素材落 `materials/YYYY-MM-DD/`，文件名带内容哈希，同一天重复投递不会产生副本
+- 只收 `.md` / `.txt` / `.csv` / `.json` 等文本；图片等暂跳过，并在结果里注明
+
+## 判断（judge）
+
+读当天素材 + `materials/profile.md`，产出 `summary` / `advice`，归档 `prompt.md` 与 `judgment.json`：
+
+```bash
+python scripts/daily_run.py --stage judge
+python scripts/daily_run.py --stage judge --provider openai
+```
+
+- 默认 `JUDGE_PROVIDER=stub`：本地模板，可离线、不花钱
+- `openai` 走任意 OpenAI 兼容网关（`JUDGE_BASE_URL`）；失败时自动降级到模板，并在产物里标「降级模式」
+- `prompt.md` 必须归档，排查时先看它
 
 ## step-ledger run（one-shot，供 crontab）
 
@@ -77,6 +98,21 @@ skill 不会自己定时，它只能被调用：
 2. 收当天素材；用户没给就主动问"今天有要记的吗"
 3. 跑采集 → 判断 → 渲染，归档到日期目录
 4. 用对话口吻说结果，并留一个可调整的点
+
+执行体（agent 调用与 cron 共用同一条管线）：
+
+```bash
+# 完整一次
+python scripts/daily_run.py --text "午饭 35，打车 22"
+python scripts/daily_run.py --file ~/Downloads/bill.md
+
+# 只重跑某一层
+python scripts/daily_run.py --stage judge
+python scripts/daily_run.py --stage render
+
+# 给 agent 自己解析的结构化结果
+python scripts/daily_run.py --json --no-echo
+```
 
 ### 定时任务与日志调试（workspace）
 

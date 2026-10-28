@@ -89,22 +89,30 @@ src/step_ledger/
 ## 当前实现状态
 
 - [x] 项目脚手架（目录结构、文档骨架、环境配置）
-- [ ] 类型定义（`shared/types.py`：`Judgment`、`RenderResult`、`PipelineResult`）
-- [ ] 配置模块（`shared/config.py` + 素材/归档路径约定）
-- [ ] `materials/profile.md` 约定（目标 / 存款 / 偏好）与读取逻辑
-- [ ] 手动素材适配器（把一段文字落成当天素材文件）
-- [ ] Stub 判断层（不调模型，返回固定语气模板）
-- [ ] 控制台渲染渠道
-- [ ] 管线编排
-- [ ] cron 入口脚本
-- [ ] 真实 AI Provider
+- [x] 类型定义（`shared/types.py`：`Judgment`、`CollectResult`、`RenderResult`、`PipelineResult`）
+- [x] 配置模块（`shared/config.py` + 素材/归档路径约定）
+- [x] `materials/profile.md` 约定（目标 / 存款 / 偏好）与读取逻辑
+- [x] 手动素材适配器（一段文字 / 一个文件 / 一个目录 → 当天素材）
+- [x] Stub 判断层（不调模型，返回固定语气模板）
+- [x] 控制台渲染渠道（`report.md` + `milestones.md` + 终端直显）
+- [x] 管线编排（`pipeline.run`，各层可单独重跑）
+- [x] cron 入口脚本（`scripts/daily_run.py`）
+- [x] 真实 AI Provider（OpenAI 兼容，失败自动降级到 stub）
+- [x] 测试（冒烟 / 契约 / 隐私扫描）
+
+### 实现备注
+
+- 入口：`scripts/daily_run.py`（cron 兜底）、`python -m step_ledger`、`step-ledger`（安装后）
+- 分阶段：`--stage collect|judge|render`，用于补投素材与断点续跑
+- `judgment.meta.progress` 记录当天 target / savings / percent，`milestones.md` 从历史
+  `judgment.json` 里汇总进度
+- 真实 provider 只需 `JUDGE_PROVIDER=openai` + `JUDGE_API_KEY`，其余走 `.env` 默认值
 
 ## 未决问题
 
-1. 素材格式统一到什么程度（纯文本 / markdown / 图片单独放）
-2. 判断层 provider 选型
-3. 图形化渲染方案：HTML→图片 vs 终端卡片
-4. 素材保留策略（只留最近 N 天 vs 永久）
+1. 素材格式：当前只解析文本类（`.md` / `.txt` / `.csv` / `.json`），图片 OCR 未做
+2. 图形化渲染：先做终端文本 + markdown，HTML / 图片渠道待补
+3. 素材保留策略（只留最近 N 天 vs 永久）
 
 ## 附录：Alternatives Considered & Why
 

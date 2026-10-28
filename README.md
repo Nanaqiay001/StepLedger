@@ -37,17 +37,56 @@ sequenceDiagram
 
 ## 快速开始
 
+项目零运行时依赖，只需要 Python ≥ 3.11。
+
 ```bash
-# 1. 创建虚拟环境并安装依赖
+# 1. 创建虚拟环境
 uv venv
-uv pip install -r requirements.txt
 
-# 2. 配置环境变量
+# 2. 配置（可选；默认用本地模板判断，不调模型）
 cp .env.example .env
-# 编辑 .env 填入真实凭证
 
-# 3. 运行
-uv run python scripts/daily_run.py
+# 3. 投一段素材，跑完整管线
+.venv/bin/python scripts/daily_run.py --text "午饭 35，打车 22，工资到账 18000"
+
+# 或者投一个账单文件
+.venv/bin/python scripts/daily_run.py --file ~/Downloads/bill.md
+
+# 查看归档
+ls materials/2026-10-28 archive/2026-10-28
+```
+
+同一天重复执行会覆盖当天产物，不会产生第二个日期目录。任一层都可以单独重跑：
+
+```bash
+.venv/bin/python scripts/daily_run.py --stage collect --text "晚上买了本书 59"
+.venv/bin/python scripts/daily_run.py --stage judge
+.venv/bin/python scripts/daily_run.py --stage render
+```
+
+想换成真实模型：把 `.env` 里的 `JUDGE_PROVIDER` 改成 `openai` 并填 `JUDGE_API_KEY`
+（任意 OpenAI 兼容网关都行，改 `JUDGE_BASE_URL`）。模型不可用时会自动退回本地模板，
+并在产物里标注「降级模式」。
+
+## 产物
+
+```
+materials/
+├── profile.md               # 目标 / 存款 / 偏好（长期状态，跨天唯一事实源）
+└── YYYY-MM-DD/              # 当天素材
+archive/YYYY-MM-DD/
+├── prompt.md                # 当天发给判断层的 prompt（必须归档）
+├── judgment.json            # summary / advice + 进度快照
+├── report.md                # 给人看的复盘
+└── milestones.md            # 目标里程碑与最近进度
+```
+
+## 开发
+
+```bash
+uv pip install pytest
+.venv/bin/python -m pytest          # 默认跳过 integration
+.venv/bin/python scripts/privacy_scan.py
 ```
 
 ## 文档
