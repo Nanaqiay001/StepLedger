@@ -34,6 +34,7 @@ description: >
 ### 可用资源
 
 - `materials/profile.md` — 目标 / 当前存款 / 偏好，跨天状态的单一事实源
+  - 没填存款时，由模型从素材里读出最新余额兜底，并在报告里标注「AI 从素材识别」；手填优先
 - `materials/YYYY-MM-DD/` — 当天素材（账单、截图、随手记、转发消息）
 - `COLLECT_SOURCE_DIRS` 指向的自动素材夹 — 快捷指令等一直往里写，跑采集时自动收当天那份
 - `archive/YYYY-MM-DD/` — 判断结果、daily prompt 与渲染产物

@@ -26,6 +26,12 @@
 - 修复：快捷指令当天追加内容会让同一源文件产生多份快照，模型把同一笔算两遍；
   素材夹改为按原文件名覆盖当天最新快照，并清掉旧 `原名-哈希` 副本
 - 真实模型（DeepSeek `deepseek-flash`）端到端跑通：素材 1 份、`degraded=false`，判断内容与账单对得上
+- `judgment.json` 的 `meta.usage` 记录 token 用量，方便核对计费
+- 存款兜底：`profile.md` 没填「当前存款」时，用模型从素材里读到的 `balance` 补进进度快照，
+  报告标注「AI 从素材识别」；手填仍优先（档案是单一事实源）。不用正则硬编码匹配短信格式
+- 新增 `./run`：`PYTHONPATH=src uv run --no-project python -m step_ledger`，绕开 uv 的
+  可编辑安装 / 本地 wheel 缓存问题，改完代码立刻生效
+- 测试 53 项（含 `test_balance.py`）
 - 采集层抽出 `store_file` / `material_files`，手动与素材夹共用「原名-内容哈希」落盘，两个来源都幂等
 - 新增 `tests/test_source_folder.py`（只收当天 / 幂等 / 日期回退 / 缺目录 / 配置与覆盖），47 项全过
 - `.env.example` 增加 `COLLECT_SOURCE_DIRS`（留空 = 只用手动投递）

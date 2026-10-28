@@ -110,6 +110,9 @@ src/step_ledger/
 - `judgment.meta.progress` 记录当天 target / savings / percent，`milestones.md` 从历史
   `judgment.json` 里汇总进度
 - 真实 provider 只需 `JUDGE_PROVIDER=openai` + `JUDGE_API_KEY`，其余走 `.env` 默认值
+- `judgment.json` 的 `meta.usage` 记录 token 用量
+- 存款来源：`materials/profile.md` 优先；没填时用判断结果里的 `meta.balance`（模型从素材读出，
+  读不到就是 `null`）兜底，`Profile.savings_from_materials` 标记并在报告里注明，不写回档案
 
 ## 未决问题
 

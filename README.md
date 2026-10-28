@@ -76,6 +76,20 @@ ls materials/2026-10-28 archive/2026-10-28
 （任意 OpenAI 兼容网关都行，改 `JUDGE_BASE_URL`）。模型不可用时会自动退回本地模板，
 并在产物里标注「降级模式」。
 
+### 用 uv 跑（推荐）
+
+```bash
+./run                      # 完整一次：收素材 → 判断 → 渲染
+./run --stage collect      # 只收素材
+```
+
+`./run` 等价于“把 `src/` 放进 PYTHONPATH，再用 `uv run python -m step_ledger`”，
+不装包、不吃 uv 的本地包缓存，改完代码立刻生效。
+
+> 别用裸 `uv run step-ledger`：uv 0.10 + CPython 3.13 下它会按可编辑方式装包，
+> 写出以 `_` 开头的 `.pth` 被 `site.py` 跳过，偶尔报 `ModuleNotFoundError`；
+> `--with .` / `--reinstall` 也可能复用旧 wheel，看不到新代码。
+
 ## 产物
 
 ```
@@ -88,6 +102,9 @@ archive/YYYY-MM-DD/
 ├── report.md                # 给人看的复盘
 └── milestones.md            # 目标里程碑与最近进度
 ```
+
+`profile.md` 里没填「当前存款」时，会由模型从素材里读出最新余额兜底，
+并在报告里标注「AI 从素材识别」；手填的数字永远优先。
 
 ## 开发
 
