@@ -77,6 +77,8 @@ class OpenAICompatibleProvider(BaseProvider):
                 "model": self.model,
                 "material_count": len(files),
                 "skipped": skipped,
+                # 顺手记下 token 用量，方便对账 / 看这次调用花了多少
+                "usage": data.get("usage") or {},
             },
         )
 
