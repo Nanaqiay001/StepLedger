@@ -3,7 +3,15 @@
 ## Changelog
 
 ### 2026-10-28
-
+- README 第三轮：删掉「三步上手」整节，示例下方的两行运行说明也一并去掉（示例自解释）；
+  uv 作为可选 runner 回归，「接真模型」并进管线一节，README 收在 5 节 70 行
+- README 命令统一成 `uv run --no-project scripts/daily_run.py ...`：跨平台、不用纠结
+  `python3` / `py`，`--no-project` 必须带（不带会去装项目依赖 `pytest`，离线直接失败）
+- 去掉 `run` 外壳脚本（bash，Windows 不可用），入口统一成 `python3 scripts/daily_run.py`；
+  README 里的示例、stage 命令、开发命令一并改掉，并注一行「Windows 上把 `python3` 换成 `py`」
+- README 第二轮瘦身（126 → 79 行）：tagline + 一段真实输出版本先行，之后才是「三步上手」；
+  mermaid 从 5 参与者的时序图换成 3 节点流程图，「设计取向 / 快速开始 / 产物 / 文档」四节合并，
+  投递方式表、uv 坑、profile 兜底等细节下沉到 `skills/StepLedger.md` 与代码注释
 - **CI 门禁**：新增 `.github/workflows/ci.yml`，push / PR / 手动触发，三个 job——
   pytest 矩阵（Python 3.11–3.14）、隐私扫描、安装冒烟（`pip install .` 后用 `step-ledger` 跑完整管线）
 - 本地按 CI 场景验证：干净检出复制副本里 45 项测试全过、隐私扫描零匹配；全新 venv 安装后入口能产出 `report.md`
