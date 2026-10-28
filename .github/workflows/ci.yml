@@ -1,0 +1,69 @@
+name: CI
+
+# 公开仓库的两条底线：pytest 全过 + 隐私扫描零匹配。
+# 另加一个安装冒烟：确认 `pip install .` 后 `step-ledger` 入口真能跑通整条管线。
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 同一分支 / PR 只留最新一次运行，避免排队烧时间
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUTF8: "1" # 中文素材 / 产物不依赖 runner 的 locale
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  test:
+    name: pytest / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # 下限 3.11 + 其后每个次版本；integration 测试要真实凭证，不在 CI 跑
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: 安装测试依赖
+        run: python -m pip install "pytest>=8"
+      - name: 跑测试
+        run: python -m pytest
+
+  privacy:
+    name: 隐私扫描
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: 扫描真实凭证 / 私人信息 / 内部路径
+        run: python scripts/privacy_scan.py
+
+  package:
+    name: 安装冒烟
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: 从源码安装
+        run: python -m pip install .
+      - name: 用安装后的入口跑一次完整管线
+        run: |
+          step-ledger --root "$RUNNER_TEMP/smoke" --date 2026-10-28 \
+            --text "午饭 35，打车 22，工资到账 18000" --no-echo
+          test -f "$RUNNER_TEMP/smoke/archive/2026-10-28/report.md"
