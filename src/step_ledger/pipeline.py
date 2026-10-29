@@ -173,7 +173,9 @@ def _render(cfg: Config, judgment: Judgment, ctx: RenderContext) -> list[RenderR
         try:
             renders.append(factory().render(judgment, ctx))
         except Exception as exc:  # 一个渠道挂了不拖垮整条管线
-            _log(ctx.archive_dir, f"{name} 渲染失败：{exc}")
+            import traceback
+            tb_str = traceback.format_exc()
+            _log(ctx.archive_dir, f"{name} 渲染失败 ({type(exc).__name__}): {exc}\n{tb_str}")
 
     if not (ctx.archive_dir / "report.md").is_file():
         renders.append(_fallback_render(judgment, ctx))

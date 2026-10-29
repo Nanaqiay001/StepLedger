@@ -7,6 +7,7 @@
   - 恪守“渲染层只负责呈现，不做 AI 推理，不调用 LLM API”的架构原则；
   - 重构 `DshPetChannel`：移除 LLM API 调用与规则匹配逻辑，专注于将 `Judgment` 组装为包含 `pet_say` 工具调用指令的提示词文件；
   - 导出产物：生成 `archive/YYYY-MM-DD/dsh_prompt.md` 供 dsh / Agent 消费，以及 `pet.md` 归档文件；
+  - 可观测性提升：在 `pipeline.py` 的渲染异常处理中记录详细异常类型与 Traceback 堆栈；
   - 在 `src/step_ledger/pipeline.py` 中注册 `dsh-pet` 渠道，无任何 API Key 依赖；
   - 更新文档 (`docs/dsh_pet_feature.md`) 与测试套件 (`tests/test_dsh_pet.py`)，全量测试无缝通过。
 - README 第三轮：删掉「三步上手」整节，示例下方的两行运行说明也一并去掉（示例自解释）；

@@ -110,3 +110,14 @@ def test_stages_are_resumable(cfg: Config) -> None:
     run(date=DATE, stage="render", config=cfg, echo=False)
     assert (_artifacts(cfg) / "report.md").is_file()
     assert (_artifacts(cfg) / "milestones.md").is_file()
+
+
+def test_channel_error_logging_includes_traceback(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("RENDER_CHANNELS", "unknown_channel,console")
+    cfg = Config.load(tmp_path)
+    result = run(date=DATE, payload="买咖啡 20", config=cfg, echo=False)
+
+    log_path = result.archive_dir / "render.log"
+    assert log_path.is_file()
+    log_content = log_path.read_text(encoding="utf-8")
+    assert "未知渠道，已跳过：unknown_channel" in log_content
