@@ -1,188 +1,76 @@
-"""DeepSeek Harness 桌宠渠道：生成 DSH Pet 提示词、离线/在线解读并归档 pet_status.json 与 pet.md。"""
+"""DeepSeek Harness 桌宠渠道：将 Judgment 组装为给 dsh / Agent 消费的提示词，并归档 dsh_prompt.md 与 pet.md。
+
+恪守渲染层职责：渲染层只负责“呈现”，不做任何 AI 推理，不调用任何 LLM API。
+"""
 
 from __future__ import annotations
-
-import json
-import urllib.error
-import urllib.request
-from typing import Any
 
 from ..base import BaseChannel
 from ...shared.profile import format_money
 from ...shared.types import Judgment, RenderContext, RenderResult
 
-DSH_PET_SYSTEM_PROMPT = """你是 DeepSeek Harness 桌宠（Aemeath），正在陪伴主人的每日理财复盘。
-请根据主人的每日复盘总结、理财建议、存款进度和状态，以桌宠轻快、有温度、说人话且鼓励主人的口气进行回应。
 
-你必须直接返回一个合法的 JSON 对象，格式如下：
-{
-  "mood": "happy|normal|worried|celebrating|thinking",
-  "action": "jumping|running|thinking|failed|idle",
-  "bubble_text": "简短的一两句气泡台词（30字以内）"
-}
-"""
-
-
-def build_dsh_pet_prompt(judgment: Judgment, ctx: RenderContext) -> str:
+def build_dsh_prompt(judgment: Judgment, ctx: RenderContext) -> str:
+    """生成面向 DeepSeek Harness / Agent 的结构化提示词。"""
     progress_pct = f"{ctx.profile.percent * 100:.1f}%" if ctx.profile.percent is not None else "未知"
     savings_str = format_money(ctx.profile.savings) if ctx.profile.savings is not None else "未填写"
     target_str = format_money(ctx.profile.target) if ctx.profile.target is not None else "未设置"
 
     lines = [
-        f"日期: {ctx.date}",
-        f"最近总结: {judgment.summary}",
-        f"理财建议: {judgment.advice}",
-        f"存款进度: {progress_pct} (当前存款: {savings_str} / 目标: {target_str})",
-        f"降级模式: {'是' if judgment.degraded else '否'}",
+        "【StepLedger 每日复盘】",
+        f"日期：{ctx.date}",
+        f"总结：{judgment.summary}",
+        f"建议：{judgment.advice}",
+        f"进度：{progress_pct} (当前存款: {savings_str} / 目标: {target_str})",
+        "",
+        "请根据以上内容，用一句话向用户播报今日复盘要点，语气轻松口语化。",
+        "然后调用 pet_say 工具，让桌宠说出这句话（参数：{ text, mood? }）；mood 可根据进度或复盘结论选择 happy、worried 或 neutral。",
     ]
-    return "\n".join(lines)
-
-
-def rule_based_pet_status(judgment: Judgment, ctx: RenderContext) -> dict[str, str]:
-    """离线/降级/无 API 时使用的规则引擎，产生具有温度的桌宠状态与台词。"""
-    summary = judgment.summary or ""
-    advice = judgment.advice or ""
-
-    if judgment.degraded:
-        return {
-            "mood": "thinking",
-            "action": "thinking",
-            "bubble_text": "今天虽然是降级模式，但我依然贴心为你记录好啦！",
-        }
-
-    if ctx.profile.percent is not None and ctx.profile.percent >= 1.0:
-        return {
-            "mood": "celebrating",
-            "action": "jumping",
-            "bubble_text": f"🎉 恭喜！存款已达 {format_money(ctx.profile.savings)}，实现100%小目标！",
-        }
-
-    income_keywords = ("收入", "工资", "到账", "奖金", "进账", "赚", "收益")
-    if any(kw in summary for kw in income_keywords):
-        return {
-            "mood": "happy",
-            "action": "jumping",
-            "bubble_text": f"好耶！有新的收入进账，离目标又近一步啦✨",
-        }
-
-    overspend_keywords = ("大手大脚", "超支", "贵", "肉疼", "浪费", "花得挺多", "超预算")
-    if any(kw in summary for kw in overspend_keywords):
-        return {
-            "mood": "worried",
-            "action": "failed",
-            "bubble_text": "呜…今天口袋瘦了一点点，明天我们省着点花哦～",
-        }
-
-    short_advice = advice[:26] if advice else "明天也要继续加油哦～"
-    return {
-        "mood": "normal",
-        "action": "running",
-        "bubble_text": f"小步慢跑中：{short_advice}",
-    }
-
-
-def _call_llm_api(prompt: str, api_key: str, model: str, base_url: str, timeout: float = 10.0) -> dict[str, Any] | None:
-    if not api_key:
-        return None
-
-    url = f"{base_url.rstrip('/')}/chat/completions"
-    payload = {
-        "model": model,
-        "temperature": 0.7,
-        "messages": [
-            {"role": "system", "content": DSH_PET_SYSTEM_PROMPT},
-            {"role": "user", "content": prompt},
-        ],
-        "response_format": {"type": "json_object"},
-    }
-
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.load(resp)
-        content = data["choices"][0]["message"]["content"]
-        res = json.loads(content)
-        if isinstance(res, dict) and "mood" in res and "action" in res and "bubble_text" in res:
-            return res
-    except Exception:
-        pass
-    return None
+    return "\n".join(lines) + "\n"
 
 
 class DshPetChannel(BaseChannel):
-    name = "dsh-pet"
+    """dsh-pet 提示词产出渠道。
 
-    def __init__(self, api_key: str = "", model: str = "gpt-4o-mini", base_url: str = "https://api.openai.com/v1") -> None:
-        self.api_key = api_key
-        self.model = model
-        self.base_url = base_url
+    本渠道只产出给 dsh / Agent 消费的提示词文件（dsh_prompt.md），不调用 LLM API，不直接驱动桌宠。
+    """
+
+    name = "dsh-pet"
 
     def render(self, judgment: Judgment, ctx: RenderContext) -> RenderResult:
         ctx.archive_dir.mkdir(parents=True, exist_ok=True)
-        prompt = build_dsh_pet_prompt(judgment, ctx)
 
-        # 优先通过 API 调用生成宠物反应，API 不可用或失败时自动退回规则匹配
-        api_result = _call_llm_api(prompt, self.api_key, self.model, self.base_url)
-        pet_status_data = api_result or rule_based_pet_status(judgment, ctx)
+        prompt_content = build_dsh_prompt(judgment, ctx)
+        dsh_prompt_path = ctx.archive_dir / "dsh_prompt.md"
+        dsh_prompt_path.write_text(prompt_content, encoding="utf-8")
 
-        full_status = {
-            "date": ctx.date,
-            "pet_name": "Aemeath",
-            "mood": pet_status_data.get("mood", "normal"),
-            "action": pet_status_data.get("action", "idle"),
-            "bubble_text": pet_status_data.get("bubble_text", "今天也要加油哦！"),
-            "prompt": prompt,
-            "summary": judgment.summary,
-            "advice": judgment.advice,
-            "progress": {
-                "target": ctx.profile.target,
-                "savings": ctx.profile.savings,
-                "distance": ctx.profile.distance,
-                "percent": ctx.profile.percent,
-            },
-            "degraded": judgment.degraded,
-        }
+        pet_md_content = self._format_pet_markdown(judgment, ctx)
+        pet_md_path = ctx.archive_dir / "pet.md"
+        pet_md_path.write_text(pet_md_content, encoding="utf-8")
 
-        # 归档 pet_status.json
-        json_path = ctx.archive_dir / "pet_status.json"
-        json_path.write_text(json.dumps(full_status, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-        # 归档 pet.md
-        pet_md_content = self._format_pet_markdown(full_status)
-        md_path = ctx.archive_dir / "pet.md"
-        md_path.write_text(pet_md_content, encoding="utf-8")
+        output_msg = (
+            f"# {ctx.date} · StepLedger dsh-pet 提示词渠道\n"
+            f"提示词已产出：{dsh_prompt_path}（等待 dsh / Agent 消费）\n"
+        )
 
         if ctx.echo:
-            print(pet_md_content)
+            print(output_msg)
 
         return RenderResult(
             channel=self.name,
-            output=pet_md_content,
-            artifacts=[json_path, md_path],
+            output=output_msg,
+            artifacts=[dsh_prompt_path, pet_md_path],
         )
 
-    def _format_pet_markdown(self, status: dict[str, Any]) -> str:
+    def _format_pet_markdown(self, judgment: Judgment, ctx: RenderContext) -> str:
+        progress_pct = f"{ctx.profile.percent * 100:.1f}%" if ctx.profile.percent is not None else "未填写"
         lines = [
-            f"# {status['date']} · DeepSeek Harness 桌宠 (Aemeath)",
-            f"- 情绪: `{status['mood']}` | 动作: `{status['action']}`",
-            "```text",
-            "┌────────────────────────────────────────────────────────┐",
-            f"│ 💬 宠物寄语: {status['bubble_text']:<41} │",
-            "└────────────────────────────────────────────────────────┘",
-            "```",
-            f"最近总结：{status['summary']}",
-            f"理财建议：{status['advice']}",
+            f"# {ctx.date} · 跬步账复盘摘要 (dsh-pet)",
+            f"- 存钱进度：{progress_pct}",
+            f"- 最近总结：{judgment.summary}",
+            f"- 理财建议：{judgment.advice}",
         ]
         return "\n".join(lines) + "\n"
 
 
-__all__ = ["DshPetChannel", "build_dsh_pet_prompt", "rule_based_pet_status"]
+__all__ = ["DshPetChannel", "build_dsh_prompt"]

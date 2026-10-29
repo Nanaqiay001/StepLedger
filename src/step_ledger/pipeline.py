@@ -161,9 +161,9 @@ def _render(cfg: Config, judgment: Judgment, ctx: RenderContext) -> list[RenderR
     renders: list[RenderResult] = []
     channel_factories = {
         "console": lambda: ConsoleChannel(),
-        "dsh-pet": lambda: DshPetChannel(api_key=cfg.api_key, model=cfg.model, base_url=cfg.base_url),
-        "dsh_pet": lambda: DshPetChannel(api_key=cfg.api_key, model=cfg.model, base_url=cfg.base_url),
-        "pet": lambda: DshPetChannel(api_key=cfg.api_key, model=cfg.model, base_url=cfg.base_url),
+        "dsh-pet": lambda: DshPetChannel(),
+        "dsh_pet": lambda: DshPetChannel(),
+        "pet": lambda: DshPetChannel(),
     }
     for name in cfg.channels:
         factory = channel_factories.get(name)
