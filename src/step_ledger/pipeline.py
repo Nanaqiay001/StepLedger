@@ -19,6 +19,7 @@ from .judge.prompt import build_prompt, read_materials
 from .judge.providers.openai_compatible import OpenAICompatibleProvider
 from .judge.providers.stub import StubProvider
 from .render.channels.console import ConsoleChannel
+from .render.channels.dsh_pet import DshPetChannel
 from .shared.config import Config
 from .shared.profile import Profile, ensure_profile, load_profile
 from .shared.types import (
@@ -158,13 +159,19 @@ def _build_provider(cfg: Config, name: str):
 
 def _render(cfg: Config, judgment: Judgment, ctx: RenderContext) -> list[RenderResult]:
     renders: list[RenderResult] = []
+    channel_factories = {
+        "console": lambda: ConsoleChannel(),
+        "dsh-pet": lambda: DshPetChannel(api_key=cfg.api_key, model=cfg.model, base_url=cfg.base_url),
+        "dsh_pet": lambda: DshPetChannel(api_key=cfg.api_key, model=cfg.model, base_url=cfg.base_url),
+        "pet": lambda: DshPetChannel(api_key=cfg.api_key, model=cfg.model, base_url=cfg.base_url),
+    }
     for name in cfg.channels:
-        channel = {"console": ConsoleChannel}.get(name)
-        if channel is None:
+        factory = channel_factories.get(name)
+        if factory is None:
             _log(ctx.archive_dir, f"未知渠道，已跳过：{name}")
             continue
         try:
-            renders.append(channel().render(judgment, ctx))
+            renders.append(factory().render(judgment, ctx))
         except Exception as exc:  # 一个渠道挂了不拖垮整条管线
             _log(ctx.archive_dir, f"{name} 渲染失败：{exc}")
 

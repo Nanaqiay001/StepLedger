@@ -3,6 +3,12 @@
 ## Changelog
 
 ### 2026-10-28
+- **DeepSeek Harness (DSH) 桌宠渲染层集成（`dsh-pet`）**：
+  - 新增 `DshPetChannel`（标识 `dsh-pet`）渲染渠道：生成 DeepSeek Harness 宠物提示词、在线 API 解读与离线规则匹配引擎；
+  - 导出产物：自动生成 `archive/YYYY-MM-DD/pet_status.json` 与 `archive/YYYY-MM-DD/pet.md` 归档文件，包含情绪（`mood`）、动作（`action`）、台词（`bubble_text`）和进度数据；
+  - 在 `src/step_ledger/pipeline.py` 与 `src/step_ledger/render/channels/__init__.py` 注册 `dsh-pet` 渠道；
+  - 编写与更新功能文档 (`docs/dsh_pet_feature.md`)、PRD (`docs/prd.md`) 及 RFC (`docs/rfc.md`)；
+  - 新增 `tests/test_dsh_pet.py` 测试套件，58 项测试全量通过。
 - README 第三轮：删掉「三步上手」整节，示例下方的两行运行说明也一并去掉（示例自解释）；
   uv 作为可选 runner 回归，「接真模型」并进管线一节，README 收在 5 节 70 行
 - README 命令统一成 `uv run --no-project scripts/daily_run.py ...`：跨平台、不用纠结
@@ -73,6 +79,8 @@
 
 ## Lessons Learned
 
+- 桌宠渲染层融入定性复盘：将沉闷的账单转化为活泼的桌宠情绪与动态台词，大幅提升了产品的趣味性与互动温度。
+- 双引擎降级机制：在线调用 API 生成情绪台词，离线/降级模式通过关键词与存款进度规则引擎无缝兜底，确保管道 100% 稳定高可用。
 - 脚手架、实现、验证应分步提交，不要一次塞太多。
 - 层的边界最好落在"文件"上：素材异构、来源不固定，内存强类型会逼着过早统一格式。
 - 先定口味再定结构：定性还是定量决定了要不要分类报表、预算阈值这些模块。
