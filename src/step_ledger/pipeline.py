@@ -161,9 +161,9 @@ def _render(cfg: Config, judgment: Judgment, ctx: RenderContext) -> list[RenderR
     renders: list[RenderResult] = []
     channel_factories = {
         "console": lambda: ConsoleChannel(),
-        "dsh-pet": lambda: DshPetChannel(),
-        "dsh_pet": lambda: DshPetChannel(),
-        "pet": lambda: DshPetChannel(),
+        "dsh-pet": lambda: DshPetChannel(bridge_url=cfg.dsh_bridge_url, bridge_token=cfg.dsh_bridge_token),
+        "dsh_pet": lambda: DshPetChannel(bridge_url=cfg.dsh_bridge_url, bridge_token=cfg.dsh_bridge_token),
+        "pet": lambda: DshPetChannel(bridge_url=cfg.dsh_bridge_url, bridge_token=cfg.dsh_bridge_token),
     }
     for name in cfg.channels:
         factory = channel_factories.get(name)

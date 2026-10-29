@@ -7,7 +7,11 @@
 **渲染层核心原则**：
 > 渲染层只负责“呈现”，**不做任何 AI 推理，不调用任何 LLM API**。
 
-DshPetChannel 作为一个纯粹的“提示词与复盘产出渠道”，把 `Judgment`（总结、建议、存钱进度）组装成一段给 DeepSeek Harness (dsh) 的提示词并写入文件 `archive/YYYY-MM-DD/dsh_prompt.md`。由 dsh 侧消费并注入 Agent 会话，Agent 处理后调用 `pet_say` 工具驱动桌宠表达。
+DshPetChannel 负责把 `Judgment`（总结、建议、存钱进度）组装成给 DeepSeek Harness (dsh) 的提示词并写入归档文件 `archive/YYYY-MM-DD/dsh_prompt.md`；并可选地通过 `dsh-ai-bridge` HTTP POST 接口投递至常驻 DSH 会话，由常驻 Agent 消费并调用 `pet_say` 工具驱动桌宠表达。
+
+**前提假设**：
+- 用户已常驻运行 DSH 会话，并已安装启用桌宠插件（如注册了 `pet_say` 工具的桌宠）；
+- 投递为可选增强：未配置 `DSH_BRIDGE_TOKEN` 时，渠道自动退化为“仅产出提示词文件”。
 
 ---
 
@@ -19,18 +23,34 @@ Judgment (summary, advice, progress)
                        ▼
              DshPetChannel.render()
                        │
+             ┌─────────┴─────────┐
+             ▼                   ▼
+    归档 dsh_prompt.md     dsh-ai-bridge HTTP POST
+  (archive/YYYY-MM-DD/)  (DSH_BRIDGE_TOKEN 配置时)
+             │                   │
+             └─────────┬─────────┘
                        ▼
-             生成 dsh 提示词 (Prompt)
-                       │
-                       ▼
-        落盘归档文件 (archive/YYYY-MM-DD/)
-        ├── dsh_prompt.md  (供 dsh / Agent 消费)
-        └── pet.md         (复盘摘要)
-                       │
-                       ▼
-           控制台直显 (echo=True)
-  "提示词已产出到 dsh_prompt.md，等待 dsh 消费"
+        返回 RenderResult (稳妥降级)
+     (不阻止网络失败，不中断 pipeline)
 ```
+
+---
+
+## 配置说明
+
+在 `.env` 或环境变量中配置：
+
+```env
+# 渲染渠道启用 dsh-pet
+RENDER_CHANNELS=console,dsh-pet
+
+# DSH AI Bridge 配置
+DSH_BRIDGE_URL=http://127.0.0.1:8000/api/ai-bridge/post
+DSH_BRIDGE_TOKEN=your-dsh-bridge-token
+```
+
+- **`DSH_BRIDGE_URL`**：桥接端点，默认 `http://127.0.0.1:8000/api/ai-bridge/post`；
+- **`DSH_BRIDGE_TOKEN`**：桥接令牌。未配置时跳过投递，日志输出提示，归档文件依然稳妥产出。
 
 ---
 
@@ -48,21 +68,9 @@ Judgment (summary, advice, progress)
 进度：1.8% (当前存款: 18,000 / 目标: 1,000,000)
 
 请根据以上内容，用一句话向用户播报今日复盘要点，语气轻松口语化。
-然后调用 pet_say 工具，让桌宠说出这句话（参数：{ text, mood? }）；mood 可根据进度或复盘结论选择 happy、worried 或 neutral。
+然后调用 pet_say 工具，让桌宠说出这句话（参数：{ text, mood? }，建议 mood：happy、worried 或 neutral；若当前环境或工具不支持所给 mood 参数则可忽略）。
 ```
 
 ### 2. `pet.md` (人类可读摘要)
 
 `archive/YYYY-MM-DD/pet.md` 仅提取 `Judgment` 原始信息，不包含任何 AI 伪造的动作或情绪字段。
-
----
-
-## 渲染管道配置
-
-在 `.env` 或环境变量中添加：
-
-```env
-RENDER_CHANNELS=console,dsh-pet
-```
-
-当 `RENDER_CHANNELS` 包含 `dsh-pet`（或 `dsh_pet` / `pet`）时，Pipeline 会自动触发 `DshPetChannel`，且无需配置任何 API key。

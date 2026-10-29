@@ -20,6 +20,8 @@ ENV_KEYS = (
     "COLLECT_SOURCE_DIRS",
     "RENDER_CHANNELS",
     "RENDER_ARCHIVE_DIR",
+    "DSH_BRIDGE_URL",
+    "DSH_BRIDGE_TOKEN",
 )
 
 DEFAULT_TARGET = 1_000_000
@@ -64,6 +66,8 @@ class Config:
     daily_run_time: str
     lookback_days: int
     channels: tuple[str, ...]
+    dsh_bridge_url: str
+    dsh_bridge_token: str
 
     @property
     def profile_path(self) -> Path:
@@ -98,6 +102,8 @@ class Config:
             daily_run_time=(os.getenv("PIPELINE_DAILY_RUN_TIME") or "21:00").strip(),
             lookback_days=_as_int(os.getenv("PIPELINE_LOOKBACK_DAYS"), 1),
             channels=channels or ("console",),
+            dsh_bridge_url=(os.getenv("DSH_BRIDGE_URL") or "http://127.0.0.1:8000/api/ai-bridge/post").strip(),
+            dsh_bridge_token=(os.getenv("DSH_BRIDGE_TOKEN") or "").strip(),
         )
 
 

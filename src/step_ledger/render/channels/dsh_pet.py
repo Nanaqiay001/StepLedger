@@ -1,9 +1,13 @@
-"""DeepSeek Harness 桌宠渠道：将 Judgment 组装为给 dsh / Agent 消费的提示词，并归档 dsh_prompt.md 与 pet.md。
+"""DeepSeek Harness 桌宠渠道：组装复盘提示词并归档 dsh_prompt.md，可选地通过 dsh-ai-bridge 投递至常驻 DSH 会话。
 
 恪守渲染层职责：渲染层只负责“呈现”，不做任何 AI 推理，不调用任何 LLM API。
 """
 
 from __future__ import annotations
+
+import json
+import urllib.error
+import urllib.request
 
 from ..base import BaseChannel
 from ...shared.profile import format_money
@@ -24,18 +28,55 @@ def build_dsh_prompt(judgment: Judgment, ctx: RenderContext) -> str:
         f"进度：{progress_pct} (当前存款: {savings_str} / 目标: {target_str})",
         "",
         "请根据以上内容，用一句话向用户播报今日复盘要点，语气轻松口语化。",
-        "然后调用 pet_say 工具，让桌宠说出这句话（参数：{ text, mood? }）；mood 可根据进度或复盘结论选择 happy、worried 或 neutral。",
+        "然后调用 pet_say 工具，让桌宠说出这句话（参数：{ text, mood? }，建议 mood：happy、worried 或 neutral；若当前环境或工具不支持所给 mood 参数则可忽略）。",
     ]
     return "\n".join(lines) + "\n"
 
 
-class DshPetChannel(BaseChannel):
-    """dsh-pet 提示词产出渠道。
+def post_to_dsh_bridge(
+    prompt_text: str, bridge_url: str = "", bridge_token: str = "", timeout: float = 10.0
+) -> tuple[bool, str]:
+    """通过 HTTP POST 将提示词投递到常驻 DSH 会话的 ai-bridge 端点。"""
+    token = (bridge_token or "").strip()
+    if not token:
+        return False, "未配置 DSH_BRIDGE_TOKEN，跳过 DSH 投递"
 
-    本渠道只产出给 dsh / Agent 消费的提示词文件（dsh_prompt.md），不调用 LLM API，不直接驱动桌宠。
+    url = (bridge_url or "http://127.0.0.1:8000/api/ai-bridge/post").strip()
+    payload = json.dumps({"from": "step-ledger", "text": prompt_text}).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "x-bridge-token": token,
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            status_code = response.getcode()
+            if 200 <= status_code < 300:
+                return True, f"提示词已成功通过 dsh-ai-bridge 投递至 DSH 会话 ({url})"
+            return False, f"投递 DSH 失败 (HTTP {status_code}, 端点: {url})"
+    except urllib.error.HTTPError as exc:
+        return False, f"投递 DSH 失败 (HTTP {exc.code}, 端点: {url}): {exc.reason}"
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        return False, f"投递 DSH 失败 ({type(exc).__name__}, 端点: {url}): {exc}"
+
+
+class DshPetChannel(BaseChannel):
+    """dsh-pet 提示词产出与投递渠道。
+
+    本渠道将复盘结果组装为提示词归档到 dsh_prompt.md，并可选地通过 dsh-ai-bridge 投递至常驻 DSH 会话。
+    前置假设：用户已常驻运行 DSH 会话并启用了桌宠插件。未配置令牌时退化为仅产出提示词文件。
     """
 
     name = "dsh-pet"
+
+    def __init__(self, bridge_url: str = "", bridge_token: str = "") -> None:
+        self.bridge_url = bridge_url
+        self.bridge_token = bridge_token
 
     def render(self, judgment: Judgment, ctx: RenderContext) -> RenderResult:
         ctx.archive_dir.mkdir(parents=True, exist_ok=True)
@@ -48,9 +89,17 @@ class DshPetChannel(BaseChannel):
         pet_md_path = ctx.archive_dir / "pet.md"
         pet_md_path.write_text(pet_md_content, encoding="utf-8")
 
+        # 尝试通过 HTTP POST 投递到常驻 DSH 会话；失败时不崩溃
+        success, detail = post_to_dsh_bridge(
+            prompt_content,
+            bridge_url=self.bridge_url,
+            bridge_token=self.bridge_token,
+        )
+
         output_msg = (
-            f"# {ctx.date} · StepLedger dsh-pet 提示词渠道\n"
-            f"提示词已产出：{dsh_prompt_path}（等待 dsh / Agent 消费）\n"
+            f"# {ctx.date} · StepLedger dsh-pet 渠道\n"
+            f"提示词归档：{dsh_prompt_path}\n"
+            f"DSH 投递状态：{detail}\n"
         )
 
         if ctx.echo:
@@ -73,4 +122,4 @@ class DshPetChannel(BaseChannel):
         return "\n".join(lines) + "\n"
 
 
-__all__ = ["DshPetChannel", "build_dsh_prompt"]
+__all__ = ["DshPetChannel", "build_dsh_prompt", "post_to_dsh_bridge"]
