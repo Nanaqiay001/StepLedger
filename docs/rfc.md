@@ -117,12 +117,16 @@ src/step_ledger/
 - `judgment.json` 的 `meta.usage` 记录 token 用量
 - 存款来源：`materials/profile.md` 优先；没填时用判断结果里的 `meta.balance`（模型从素材读出，
   读不到就是 `null`）兜底，`Profile.savings_from_materials` 标记并在报告里注明，不写回档案
+- 空素材日不调模型：0 份素材时直接走 stub 模板并标 `meta.provider = "none"`；空 prompt 只会让模型编
+- 采集自证：CLI 普通输出打一行 `采集：共 N 份素材；<跳过的原因>`，`--json` 时 stdout 仍只有 JSON
 
 ## 未决问题
 
 1. 素材格式：当前只解析文本类（`.md` / `.txt` / `.csv` / `.json`），图片 OCR 未做
 2. 图形化渲染：先做终端文本 + markdown，HTML / 图片渠道待补
 3. 素材保留策略（只留最近 N 天 vs 永久）
+4. 漏跑补账：采集只认当天日期，某天没跑管线，那天的源文件就进不了账本（10-29 的三笔即此例）。
+   补法要么在 `run()` 里扫历史缺口逐日补判断，要么手工 `--date` 重投一次；目前选后者，先不做自动补
 
 ## 附录：Alternatives Considered & Why
 
