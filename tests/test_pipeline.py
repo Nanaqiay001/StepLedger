@@ -6,7 +6,8 @@ import json
 from pathlib import Path
 
 from conftest import DATE
-from step_ledger.pipeline import run
+from step_ledger.judge.providers.openai_compatible import OpenAICompatibleProvider
+from step_ledger.pipeline import main, run
 from step_ledger.shared.config import Config
 
 
@@ -67,6 +68,50 @@ def test_empty_day_is_honest(cfg: Config) -> None:
     assert "今天没有记录" in result.judgment.summary
     assert result.judgment.advice.strip()
     assert (_artifacts(cfg) / "judgment.json").is_file()
+
+
+def test_empty_day_never_hits_the_model(cfg: Config, monkeypatch) -> None:
+    """空素材直接走模板：配了 openai 也不发请求，别让模型对着空 prompt 编。"""
+    calls: list[object] = []
+
+    def _boom(self, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+        calls.append(args)
+        raise AssertionError("空素材不该调模型")
+
+    monkeypatch.setattr(OpenAICompatibleProvider, "judge", _boom)
+    result = run(date=DATE, config=cfg, provider="openai", echo=False)
+
+    assert calls == []
+    assert result.judgment is not None
+    assert result.judgment.degraded is False
+    assert result.judgment.meta["provider"] == "none"
+    assert result.judgment.meta["requested_provider"] == "openai"
+    assert result.judgment.meta["material_count"] == 0
+    assert "今天没有记录" in (_artifacts(cfg) / "report.md").read_text(encoding="utf-8")
+
+
+def test_cli_reports_what_collect_did(tmp_path: Path, capsys) -> None:
+    """采集空手而归时必须说出来——这次事故就是没人看见"0 份"。"""
+    source = tmp_path / "billbox"
+    source.mkdir()
+    (source / "20261020.txt").write_text("旧账 21.00\n", encoding="utf-8")
+
+    code = main(["--root", str(tmp_path), "--date", DATE, "--source", str(source)])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "采集：共 0 份素材" in out
+    assert "billbox: 没有 2026-10-28 的素材" in out
+
+
+def test_cli_json_stdout_stays_pure(tmp_path: Path, capsys) -> None:
+    """--json 时 stdout 只能有 JSON，采集小结不能混进去。"""
+    code = main(["--root", str(tmp_path), "--date", DATE, "--json"])
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["date"] == DATE
+    assert payload["judgment"]["meta"]["provider"] == "none"
 
 
 def test_agent_style_natural_language_payload(cfg: Config) -> None:

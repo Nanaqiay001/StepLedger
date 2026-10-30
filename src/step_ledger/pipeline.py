@@ -120,6 +120,13 @@ def _collect(
 
 def _judge(cfg: Config, materials_dir: Path, profile: Profile, run_date: str, override: str | None) -> Judgment:
     requested = (override or cfg.provider or "stub").strip().lower()
+    if not material_files(materials_dir):
+        # 没素材就不问模型：空料只会让它编，模板把"今天没记录"说得更实在
+        judgment = StubProvider().judge(materials_dir, profile, run_date)
+        judgment.meta["provider"] = "none"
+        judgment.meta["requested_provider"] = requested
+        _stamp_progress(judgment, _with_judged_savings(profile, judgment), run_date)
+        return judgment
     try:
         provider = _build_provider(cfg, requested)
         judgment = provider.judge(materials_dir, profile, run_date)
@@ -243,6 +250,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.json:
         print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+        return 0
+
+    # 采集这层最容易静默出错：0 份素材也得说出来，别让人对着空气写总结
+    summary = f"采集：共 {len(material_files(result.materials_dir))} 份素材"
+    if result.skipped:
+        summary += "；" + "；".join(result.skipped)
+    print(summary)
     return 0
 
 
