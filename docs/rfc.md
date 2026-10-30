@@ -95,6 +95,7 @@ src/step_ledger/
 - [x] 素材来源适配器（手动：一段文字 / 一个文件 / 一个目录；素材夹：快捷指令写入的目录按日期只收当天）
 - [x] Stub 判断层（不调模型，返回固定语气模板）
 - [x] 控制台渲染渠道（`report.md` + `milestones.md` + 终端直显）
+- [x] DeepSeek Harness 桌宠渲染渠道（`dsh-pet`：`dsh_prompt.md` + `pet.md` 提示词与复盘产出，详见 `docs/dsh_pet_feature.md`）
 - [x] 管线编排（`pipeline.run`，各层可单独重跑）
 - [x] cron 入口脚本（`scripts/daily_run.py`）
 - [x] 真实 AI Provider（OpenAI 兼容，失败自动降级到 stub）

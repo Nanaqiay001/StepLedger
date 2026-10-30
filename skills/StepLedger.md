@@ -174,7 +174,8 @@ archive/YYYY-MM-DD/
 ├── prompt.md                # 当天 prompt（必须归档）
 ├── judgment.json            # summary / advice
 ├── report.md                # 总结图表 / 渲染产物
-└── milestones.md            # 目标里程碑（累计进度）
+├── milestones.md            # 目标里程碑（累计进度）
+└── dsh_prompt.md            # DSH 桌宠提示词（选用 dsh-pet 渲染渠道时）
 ```
 
 - `judgment.json` 的 `summary` 与 `advice` 均非空
