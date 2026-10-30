@@ -19,6 +19,7 @@ from .judge.prompt import build_prompt, read_materials
 from .judge.providers.openai_compatible import OpenAICompatibleProvider
 from .judge.providers.stub import StubProvider
 from .render.channels.console import ConsoleChannel
+from .render.channels.pet import PetChannel
 from .shared.config import Config
 from .shared.profile import Profile, ensure_profile, load_profile
 from .shared.types import (
@@ -159,7 +160,10 @@ def _build_provider(cfg: Config, name: str):
 def _render(cfg: Config, judgment: Judgment, ctx: RenderContext) -> list[RenderResult]:
     renders: list[RenderResult] = []
     for name in cfg.channels:
-        channel = {"console": ConsoleChannel}.get(name)
+        channel = {
+            "console": ConsoleChannel,
+            "pet": lambda: PetChannel(cfg.pet_base_url, cfg.pet_id, cfg.pet_anim_tiers),
+        }.get(name)
         if channel is None:
             _log(ctx.archive_dir, f"未知渠道，已跳过：{name}")
             continue
