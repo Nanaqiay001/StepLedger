@@ -11,6 +11,7 @@ sequenceDiagram
     participant M as 📁 素材文件
     participant J as 🧠 判断层
     participant R as ✨ 渲染层
+    participant P as 🐾 外部呈现<br/>（可选，如桌宠）
 
     DS->>C: 原始账单 / 消息 / 手动输入
     activate C
@@ -22,6 +23,7 @@ sequenceDiagram
     deactivate J
     activate R
     R->>R: 可视化 + 归档 → RenderResult
+    R-->>P: 可选渠道投喂（失败可忽略）
     deactivate R
 ```
 
@@ -99,6 +101,8 @@ src/step_ledger/
 - [x] cron 入口脚本（`scripts/daily_run.py`）
 - [x] 真实 AI Provider（OpenAI 兼容，失败自动降级到 stub）
 - [x] 测试（冒烟 / 契约 / 隐私扫描）
+- [x] 桌宠播报渠道 `pet`（渲染层只写 `pet_task.md` 简报，由宿主 agent 用
+  `scripts/pet_play.py` 决定说什么、播什么；spec 见 [feature-pet-channel.md](feature-pet-channel.md)）
 
 ### 实现备注
 
