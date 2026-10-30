@@ -20,6 +20,9 @@ ENV_KEYS = (
     "COLLECT_SOURCE_DIRS",
     "RENDER_CHANNELS",
     "RENDER_ARCHIVE_DIR",
+    "PET_BASE_URL",
+    "PET_ID",
+    "PET_ANIM_TIERS",
 )
 
 DEFAULT_TARGET = 1_000_000
@@ -64,6 +67,9 @@ class Config:
     daily_run_time: str
     lookback_days: int
     channels: tuple[str, ...]
+    pet_base_url: str
+    pet_id: str
+    pet_anim_tiers: str
 
     @property
     def profile_path(self) -> Path:
@@ -98,6 +104,9 @@ class Config:
             daily_run_time=(os.getenv("PIPELINE_DAILY_RUN_TIME") or "21:00").strip(),
             lookback_days=_as_int(os.getenv("PIPELINE_LOOKBACK_DAYS"), 1),
             channels=channels or ("console",),
+            pet_base_url=(os.getenv("PET_BASE_URL") or "").strip(),
+            pet_id=(os.getenv("PET_ID") or "main").strip(),
+            pet_anim_tiers=(os.getenv("PET_ANIM_TIERS") or "").strip(),
         )
 
 
