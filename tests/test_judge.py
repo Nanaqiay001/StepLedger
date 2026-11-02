@@ -8,7 +8,12 @@ import pytest
 
 from step_ledger.collect.adapters.manual import collect
 from step_ledger.judge.base import ProviderError
-from step_ledger.judge.prompt import build_prompt, parse_judgment_response, read_materials
+from step_ledger.judge.prompt import (
+    build_prompt,
+    parse_judgment_response,
+    read_materials,
+    strip_secrets,
+)
 from step_ledger.judge.providers.openai_compatible import OpenAICompatibleProvider
 from step_ledger.judge.providers.stub import StubProvider
 from step_ledger.shared.profile import parse_profile
@@ -105,3 +110,31 @@ def test_prompt_carries_goal_deadline(tmp_path: Path) -> None:
     assert "目标日期：2030-12" in prompt
     assert "还剩 49 个月" in prompt
     assert "每月要存 ¥16,327" in prompt
+
+
+def test_strip_secrets_drops_one_time_codes() -> None:
+    """验证码对判断没用，泄露一次就是一次：发出去之前摘掉，素材原样留盘。"""
+    text = (
+        "{12:15}-{支取人民币 25.00 元,交易后余额 12292.98}\n"
+        "{18:58}-{短信验证码：100442，切勿将验证码告知他人}\n"
+        "{18:59}-{与财付通成功签约}\n"
+    )
+
+    kept = strip_secrets(text)
+
+    assert "100442" not in kept
+    assert "12292.98" in kept
+    assert "成功签约" in kept
+
+
+def test_read_materials_filters_secrets_but_keeps_file(tmp_path: Path) -> None:
+    materials = tmp_path / "2026-11-02"
+    materials.mkdir()
+    source = materials / "sms.txt"
+    source.write_text("验证码：999888，请勿告知\n支出 25.00 元\n", encoding="utf-8")
+
+    text, _ = read_materials(materials)
+
+    assert "999888" not in text
+    assert "25.00" in text
+    assert "999888" in source.read_text(encoding="utf-8")  # 盘上还是原样
