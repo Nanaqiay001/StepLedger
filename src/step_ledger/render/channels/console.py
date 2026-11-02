@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from ..base import BaseChannel
-from ...shared.profile import Profile, format_money
+from ...shared.profile import Profile, format_money, goal_plan
 from ...shared.types import Judgment, RenderContext, RenderResult
 
 BAR_CELLS = 10
@@ -41,6 +41,12 @@ class ConsoleChannel(BaseChannel):
             f"- 还差：{'未知' if ctx.profile.distance is None else format_money(ctx.profile.distance)}",
             f"- 进度：{_progress_line(ctx.profile)}",
         ]
+        plan = goal_plan(ctx.profile, ctx.date)
+        if plan is not None:
+            lines.append(
+                f"- 目标日期：{plan.deadline}（还剩 {plan.months} 个月，"
+                f"每月要存 {format_money(plan.per_month)}，不计收益）"
+            )
         if ctx.profile_created:
             lines += ["", "> 第一次见：把你的目标和存款写进 `materials/profile.md`，我下次就记住了。"]
         if judgment.degraded:

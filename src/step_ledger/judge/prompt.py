@@ -9,7 +9,7 @@ import json
 import re
 from pathlib import Path
 
-from ..shared.profile import Profile, format_money
+from ..shared.profile import Profile, format_money, goal_plan
 
 SYSTEM_PROMPT = """你是 StepLedger（跬步账）的判断器。用户每天把收支素材交给你，
 你要说两件事：最近钱花得怎么样（summary）、下一步可以怎么调（advice），
@@ -67,13 +67,20 @@ def build_prompt(profile: Profile, materials_text: str, date: str, material_coun
     materials = materials_text.strip() or "（今天没有留下任何素材）"
     agreements = _agreements(profile)
     agreed = f"\n## 我的约定（按我的口径解读，别自己推断）\n{agreements}\n" if agreements else ""
+    plan = goal_plan(profile, date)
+    paced = (
+        f"- 目标日期：{plan.deadline}（还剩 {plan.months} 个月，"
+        f"每月要存 {format_money(plan.per_month)}，不计收益）\n"
+        if plan
+        else ""
+    )
     return f"""今天是 {date}。
 
 ## 我的档案
 - 目标：{format_money(profile.target)}
 - 当前存款：{savings}
 - 离目标还差：{distance}
-- 偏好：{_preference(profile)}
+{paced}- 偏好：{_preference(profile)}
 {agreed}
 ## 今天的素材（共 {material_count} 份）
 {materials}
@@ -86,14 +93,9 @@ def build_prompt(profile: Profile, materials_text: str, date: str, material_coun
 
 
 def _agreements(profile: Profile) -> str:
-    """档案里写着「约定」的行逐条进 prompt：用户自己的口径优先于模型推断。"""
-    items = []
-    for line in profile.raw.splitlines():
-        parts = re.split(r"[:：]", line, maxsplit=1)
-        if len(parts) != 2 or not parts[1].strip():
-            continue
-        if re.sub(r"^[\s\-*+]+", "", parts[0]).strip() == "约定":
-            items.append(f"- {parts[1].strip()}")
+    """档案里的「约定」逐条进 prompt：用户自己的口径优先于模型推断。"""
+    items = [f"- {key}：{value}" for key, value in profile.agreements.items()]
+    items += [f"- {note}" for note in profile.notes]
     return "\n".join(items)
 
 

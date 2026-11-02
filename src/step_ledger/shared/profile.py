@@ -7,7 +7,9 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import date
+from math import ceil
 from pathlib import Path
 
 from .config import DEFAULT_TARGET
@@ -18,6 +20,7 @@ TEMPLATE = """# 理财档案
 - 当前存款：
 - 提醒时间：21:00
 - 偏好：说人话，别太严厉
+- 约定：
 
 > 这是 StepLedger 的长期状态，随时可以改。
 """
@@ -25,6 +28,17 @@ TEMPLATE = """# 理财档案
 _AMOUNT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(亿|万|w|k|千)?", re.IGNORECASE)
 _TIME_RE = re.compile(r"(\d{1,2})\s*[:：]\s*(\d{2})")
 _LINE_RE = re.compile(r"^\s*[-*+]?\s*([\u4e00-\u9fa5A-Za-z ]{1,12})\s*[:：]\s*(.*)$")
+_KV_RE = re.compile(r"^(?P<key>[^=＝]{1,20})[=＝]\s*(?P<value>.+)$")
+_DEADLINE_RE = re.compile(r"(20\d{2})\s*[-/.年]\s*(\d{1,2})")
+
+
+@dataclass(frozen=True)
+class GoalPlan:
+    """目标日期的倒推：还剩几个月、每月要存多少（不计收益）。"""
+
+    deadline: str
+    months: int
+    per_month: int
 
 
 @dataclass
@@ -37,6 +51,8 @@ class Profile:
     savings_from_materials: bool = False
     preferred_time: str | None = None
     created: bool = False
+    agreements: dict[str, str] = field(default_factory=dict)
+    notes: list[str] = field(default_factory=list)
 
     @property
     def distance(self) -> int | None:
@@ -97,6 +113,9 @@ def parse_profile(raw: str, path: Path) -> Profile:
         key, value = match.group(1).strip(), match.group(2).strip()
         if not value:
             continue
+        if key == "约定":
+            _remember_agreement(profile, value)
+            continue
         if "目标" in key:
             parsed = parse_amount(value)
             if parsed:
@@ -110,6 +129,34 @@ def parse_profile(raw: str, path: Path) -> Profile:
             if parsed_time:
                 profile.preferred_time = parsed_time
     return profile
+
+
+def _remember_agreement(profile: Profile, text: str) -> None:
+    """`键 = 值` 记成结构化约定（代码能用），其余原话进 prompt 给人读。"""
+    match = _KV_RE.match(text.strip())
+    if match:
+        profile.agreements[match["key"].strip()] = match["value"].strip()
+    else:
+        profile.notes.append(text.strip())
+
+
+def goal_plan(profile: Profile, today: str) -> GoalPlan | None:
+    """读 `约定：目标日期 = 2030-12`，算出还剩几个月、每月要存多少（不计收益）。"""
+    match = _DEADLINE_RE.search(profile.agreements.get("目标日期", ""))
+    if not match or profile.distance is None:
+        return None
+    year, month = int(match.group(1)), int(match.group(2))
+    if not 1 <= month <= 12:
+        return None
+    try:
+        current = date.fromisoformat(today)
+    except ValueError:
+        return None
+    months = (year - current.year) * 12 + (month - current.month)
+    if months < 0:
+        return None
+    months = max(months, 1)
+    return GoalPlan(deadline=f"{year}-{month:02d}", months=months, per_month=ceil(profile.distance / months))
 
 
 def ensure_profile(path: Path) -> Profile:

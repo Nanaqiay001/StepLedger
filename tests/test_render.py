@@ -75,3 +75,17 @@ def test_missing_profile_still_renders(tmp_path: Path) -> None:
     report = (ctx.archive_dir / "report.md").read_text(encoding="utf-8")
     assert "第一次见" in report
     assert "暂时画不出进度条" in report
+
+
+def test_report_shows_goal_deadline(tmp_path: Path) -> None:
+    """档案写了目标日期，报告就要给出还剩几个月、每月存多少。"""
+    profile = parse_profile(
+        "- 目标：100 万\n- 当前存款：20 万\n- 约定：目标日期 = 2030-12\n", tmp_path / "profile.md"
+    )
+    judgment = Judgment(summary="还行", advice="继续")
+
+    report = ConsoleChannel().render(judgment, _ctx(tmp_path, profile)).output
+
+    assert "目标日期：2030-12" in report
+    assert "还剩 50 个月" in report
+    assert "每月要存 ¥16,000" in report
