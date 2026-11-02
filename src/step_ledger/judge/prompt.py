@@ -27,6 +27,14 @@ SYSTEM_PROMPT = """你是 StepLedger（跬步账）的判断器。用户每天�
 
 MAX_MATERIAL_CHARS = 8000
 TEXT_SUFFIXES = {".md", ".txt", ".markdown", ".csv", ".log", ".json", ".yaml", ".yml"}
+# 一次性口令不该离开本机：素材原样留在盘上，但发给模型前把这些行摘掉
+SECRET_LINE = re.compile(r"验证码|校验码|动态密码|动态码|短信密码|安全码|切勿.{0,6}告知")
+
+
+def strip_secrets(text: str) -> str:
+    """摘掉验证码之类的一次性口令行：它们对判断没用，但泄露一次就是一次。"""
+    kept = [line for line in text.splitlines() if not SECRET_LINE.search(line)]
+    return "\n".join(kept)
 
 
 def read_materials(materials_dir: Path, max_chars: int = MAX_MATERIAL_CHARS) -> tuple[str, list[str]]:
@@ -47,6 +55,7 @@ def read_materials(materials_dir: Path, max_chars: int = MAX_MATERIAL_CHARS) -> 
         except (OSError, UnicodeDecodeError):
             skipped.append(f"{path.name}: 无法解码，已跳过")
             continue
+        text = strip_secrets(text)
         if not text.strip():
             continue
         piece = f"### {path.name}\n{text.strip()}"
