@@ -8,7 +8,7 @@ import pytest
 
 from step_ledger.collect.adapters.manual import collect
 from step_ledger.judge.base import ProviderError
-from step_ledger.judge.prompt import parse_judgment_response, read_materials
+from step_ledger.judge.prompt import build_prompt, parse_judgment_response, read_materials
 from step_ledger.judge.providers.openai_compatible import OpenAICompatibleProvider
 from step_ledger.judge.providers.stub import StubProvider
 from step_ledger.shared.profile import parse_profile
@@ -39,6 +39,26 @@ def test_stub_without_materials_is_honest(tmp_path: Path) -> None:
     assert "今天没有记录" in judgment.summary
     assert judgment.advice.strip()
     assert judgment.meta["material_count"] == 0
+
+
+def test_prompt_carries_user_agreements(tmp_path: Path) -> None:
+    """档案里的「约定」必须进 prompt：用户的口径优先于模型推断。"""
+    raw = "- 目标：100 万\n- 约定：短信里 3.88 元是笔笔攒，算存钱不算花销\n"
+    profile = parse_profile(raw, tmp_path / "profile.md")
+
+    prompt = build_prompt(profile, "3.88 元", "2026-10-31", 1)
+
+    assert "## 我的约定" in prompt
+    assert "3.88 元是笔笔攒" in prompt
+
+
+def test_prompt_without_agreements_has_no_empty_section(tmp_path: Path) -> None:
+    profile = parse_profile("- 目标：100 万\n", tmp_path / "profile.md")
+
+    prompt = build_prompt(profile, "午饭 35", "2026-10-31", 1)
+
+    assert "我的约定" not in prompt
+    assert "偏好：说人话" in prompt
 
 
 def test_parse_json_response() -> None:
