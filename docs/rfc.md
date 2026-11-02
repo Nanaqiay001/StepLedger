@@ -119,6 +119,9 @@ src/step_ledger/
   读不到就是 `null`）兜底，`Profile.savings_from_materials` 标记并在报告里注明，不写回档案
 - 空素材日不调模型：0 份素材时直接走 stub 模板并标 `meta.provider = "none"`；空 prompt 只会让模型编
 - 采集自证：CLI 普通输出打一行 `采集：共 N 份素材；<跳过的原因>`，`--json` 时 stdout 仍只有 JSON
+- 趋势产物（渲染层顺手写）：`archive/<日期>/trend.svg` 与 `trend.csv`。数据源是各日
+  `judgment.json` 的 `meta.balance`（卡内余额），按自然日补空、缺口不连成假线；
+  SVG 是 W3C 标准矢量图（零依赖、坐标精确），CSV 供任何表格工具重画
 - `materials/profile.md` 的 `约定：` 分两种：`键 = 值` 进 `Profile.agreements`（代码可用），
   其余原话进 `Profile.notes`；两者都会进 prompt，`目标日期` 还会额外算成「还剩几个月 / 每月要存多少」
 

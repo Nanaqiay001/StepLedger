@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from ..base import BaseChannel
+from ..trend import write as write_trend
 from ...shared.profile import Profile, format_money, goal_plan
 from ...shared.types import Judgment, RenderContext, RenderResult
 
@@ -25,9 +26,12 @@ class ConsoleChannel(BaseChannel):
         milestones_path = ctx.archive_dir / "milestones.md"
         milestones_path.write_text(self._milestones(ctx), encoding="utf-8")
 
+        artifacts = [report_path, milestones_path]
+        artifacts += write_trend(ctx.archive_dir.parent, ctx.archive_dir)
+
         if ctx.echo:
             print(report)
-        return RenderResult(channel=self.name, output=report, artifacts=[report_path, milestones_path])
+        return RenderResult(channel=self.name, output=report, artifacts=artifacts)
 
     def _report(self, judgment: Judgment, ctx: RenderContext) -> str:
         lines = [
