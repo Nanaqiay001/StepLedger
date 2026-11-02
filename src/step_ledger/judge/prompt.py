@@ -65,6 +65,8 @@ def build_prompt(profile: Profile, materials_text: str, date: str, material_coun
     savings = format_money(profile.savings)
     distance = "未知" if profile.distance is None else format_money(profile.distance)
     materials = materials_text.strip() or "（今天没有留下任何素材）"
+    agreements = _agreements(profile)
+    agreed = f"\n## 我的约定（按我的口径解读，别自己推断）\n{agreements}\n" if agreements else ""
     return f"""今天是 {date}。
 
 ## 我的档案
@@ -72,7 +74,7 @@ def build_prompt(profile: Profile, materials_text: str, date: str, material_coun
 - 当前存款：{savings}
 - 离目标还差：{distance}
 - 偏好：{_preference(profile)}
-
+{agreed}
 ## 今天的素材（共 {material_count} 份）
 {materials}
 
@@ -81,6 +83,18 @@ def build_prompt(profile: Profile, materials_text: str, date: str, material_coun
 参考目标，但别做审计、别算总账。
 另外读出素材里最新的账户余额放进 balance（素材没写就给 null）。只输出 JSON。
 """
+
+
+def _agreements(profile: Profile) -> str:
+    """档案里写着「约定」的行逐条进 prompt：用户自己的口径优先于模型推断。"""
+    items = []
+    for line in profile.raw.splitlines():
+        parts = re.split(r"[:：]", line, maxsplit=1)
+        if len(parts) != 2 or not parts[1].strip():
+            continue
+        if re.sub(r"^[\s\-*+]+", "", parts[0]).strip() == "约定":
+            items.append(f"- {parts[1].strip()}")
+    return "\n".join(items)
 
 
 def _preference(profile: Profile) -> str:
