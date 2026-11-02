@@ -43,13 +43,13 @@ def test_stub_without_materials_is_honest(tmp_path: Path) -> None:
 
 def test_prompt_carries_user_agreements(tmp_path: Path) -> None:
     """档案里的「约定」必须进 prompt：用户的口径优先于模型推断。"""
-    raw = "- 目标：100 万\n- 约定：短信里 3.88 元是笔笔攒，算存钱不算花销\n"
+    raw = "- 目标：100 万\n- 约定：某笔固定小额是自动存钱，算存钱不算花销\n"
     profile = parse_profile(raw, tmp_path / "profile.md")
 
-    prompt = build_prompt(profile, "3.88 元", "2026-10-31", 1)
+    prompt = build_prompt(profile, "一笔小额", "2026-10-31", 1)
 
     assert "## 我的约定" in prompt
-    assert "3.88 元是笔笔攒" in prompt
+    assert "某笔固定小额是自动存钱" in prompt
 
 
 def test_prompt_without_agreements_has_no_empty_section(tmp_path: Path) -> None:
@@ -92,3 +92,16 @@ def test_long_material_is_truncated(tmp_path: Path) -> None:
 
     assert "已截断" in text
     assert any("截断" in item for item in skipped)
+
+
+def test_prompt_carries_goal_deadline(tmp_path: Path) -> None:
+    """目标日期要进 prompt，让判断按节奏说话（还剩几个月、每月存多少）。"""
+    profile = parse_profile(
+        "- 目标：100 万\n- 当前存款：20 万\n- 约定：目标日期 = 2030-12\n", tmp_path / "profile.md"
+    )
+
+    prompt = build_prompt(profile, "午饭 35", "2026-11-02", 1)
+
+    assert "目标日期：2030-12" in prompt
+    assert "还剩 49 个月" in prompt
+    assert "每月要存 ¥16,327" in prompt
