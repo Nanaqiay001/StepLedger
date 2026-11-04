@@ -26,6 +26,14 @@ RULES: list[tuple[str, re.Pattern[str]]] = [
 
 
 def _candidate_files(root: Path) -> list[Path]:
+    """只看会被发布出去的文件：git 跟踪的（含已暂存），否则退回遍历。
+
+    本地临时产物（图表工具生成目录、浏览器 profile 之类）不该让扫描失败——
+    它们本来就不会进仓库，扫它们只会制造噪音。
+    """
+    tracked = _git_files(root)
+    if tracked is not None:
+        return [path for path in tracked if path.name != ".env"]
     files: list[Path] = []
     for path in root.rglob("*"):
         if not path.is_file():
@@ -36,6 +44,20 @@ def _candidate_files(root: Path) -> list[Path]:
             continue  # 凭证文件本身允许有 key，但不能被提交；下面单独检查
         files.append(path)
     return files
+
+
+def _git_files(root: Path) -> list[Path] | None:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z", "--cached"],
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0 or not result.stdout:
+        return None
+    return [root / name for name in result.stdout.split("\0") if name]
 
 
 def _env_tracked(root: Path) -> bool:
