@@ -41,7 +41,7 @@ class MuteProvider(Reader):
 
     name = "mute"
 
-    def judge(self, materials_dir: Path, profile, date: str = "") -> Judgment:
+    def speak(self, materials_dir: Path, profile, date: str = "", facts=None, trend=None) -> Judgment:
         raise RuntimeError("模型返回不是约定的 JSON")
 
 
@@ -109,7 +109,7 @@ def test_empty_day_skips_both_model_calls(tmp_path: Path) -> None:
         def observe(self, materials_text: str, date: str = "") -> Observation:
             raise AssertionError("空素材不该观察")
 
-        def judge(self, materials_dir: Path, profile, date: str = "") -> Judgment:
+        def speak(self, materials_dir: Path, profile, date: str = "", facts=None, trend=None) -> Judgment:
             raise AssertionError("空素材不该说话")
 
     judgment = _run(tmp_path, provider=NeverCalled(), materials=_materials(tmp_path, text=None))

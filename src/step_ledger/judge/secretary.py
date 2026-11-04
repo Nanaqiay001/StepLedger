@@ -88,23 +88,23 @@ def run(
     trend = summarize_trend(day=date, history=history, facts=facts)
 
     if not files:
-        judgment = StubProvider().judge(materials_dir, profile, date)
+        judgment = StubProvider().speak(materials_dir, profile, date, facts, trend)
         runtime["steps"]["speak"] = "stub"
         runtime["provider"] = "none"
     else:
         try:
-            judgment = provider.judge(materials_dir, profile, date)
+            judgment = provider.speak(materials_dir, profile, date, facts, trend)
             if not judgment.is_valid:
                 raise ProviderError("判断结果为空")
             runtime["steps"]["speak"] = "ok"
         except Exception as exc:  # 模型不可用 → 模板兜底，但必须标注降级
-            judgment = StubProvider().judge(materials_dir, profile, date)
+            judgment = StubProvider().speak(materials_dir, profile, date, facts, trend)
             runtime["steps"]["speak"] = "failed"
             degraded = True
             notes.append(f"说话失败：{exc}")
 
     if not judgment.prompt:
-        judgment.prompt = build_prompt(profile, text, date, len(files))
+        judgment.prompt = build_prompt(profile, text, date, len(files), facts, trend)
 
     merged = {key: value for key, value in {**judgment.runtime, **runtime}.items() if key in RUNTIME_KEYS}
     merged["steps"] = runtime["steps"]

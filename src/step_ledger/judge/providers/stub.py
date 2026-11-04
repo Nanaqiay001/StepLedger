@@ -10,7 +10,7 @@ from pathlib import Path
 from ..base import BaseProvider
 from ..prompt import build_prompt, read_materials
 from ...shared.profile import Profile, format_money
-from ...shared.types import Judgment, Observation
+from ...shared.types import Facts, Judgment, Observation, TrendSummary
 
 _SPEND_HINTS = ("支出", "花了", "付款", "消费", "买", "打车", "外卖", "房租")
 _INCOME_HINTS = ("收入", "工资", "到账", "退款", "报销", "奖金")
@@ -23,10 +23,17 @@ class StubProvider(BaseProvider):
         """不猜数：读不出来就是读不出来，交给历史余额兜底。"""
         return Observation()
 
-    def judge(self, materials_dir: Path, profile: Profile, date: str = "") -> Judgment:
+    def speak(
+        self,
+        materials_dir: Path,
+        profile: Profile,
+        date: str = "",
+        facts: Facts | None = None,
+        trend: TrendSummary | None = None,
+    ) -> Judgment:
         text, skipped = read_materials(materials_dir)
         files = [p for p in materials_dir.iterdir() if p.is_file() and p.name != "profile.md"] if materials_dir.is_dir() else []
-        prompt = build_prompt(profile, text, date, len(files))
+        prompt = build_prompt(profile, text, date, len(files), facts, trend)
 
         if not text.strip():
             summary = "今天没有记录，空白也是一种信息——至少没有意外的大额。"
@@ -46,7 +53,9 @@ class StubProvider(BaseProvider):
                 "income_mentions": income,
             }
 
-        if profile.distance is not None:
+        if facts is not None:
+            advice += _pace_advice(facts)
+        elif profile.distance is not None:
             runtime["distance"] = profile.distance
         runtime["skipped"] = skipped
         return Judgment(summary=summary, advice=advice, prompt=prompt, runtime=runtime)
@@ -76,6 +85,22 @@ class StubProvider(BaseProvider):
         if profile.distance is not None and profile.distance > 0:
             base += f"离 {format_money(profile.target)} 还有 {format_money(profile.distance)}，慢慢来就好。"
         return base
+
+
+def _pace_advice(facts: Facts) -> str:
+    """降级路径也要说得出额度：事实已经算好了，模板直接用。"""
+    pace = facts.pace
+    month = facts.month
+    if month is not None and month.short and month.left is not None:
+        return f"这个月已经超了 {format_money(-month.left)}，接下来先贴着额度走。"
+    if pace is None:
+        return ""
+    if pace.over:
+        tail = f"，明天降到 {format_money(pace.tomorrow)} 匀回来" if pace.tomorrow is not None else ""
+        return f"今天累计超了 {format_money(-pace.left)}{tail}。"
+    if pace.tomorrow is not None:
+        return f"今天还剩 {format_money(pace.left)} 额度，明天照 {format_money(pace.tomorrow)}。"
+    return ""
 
 
 __all__ = ["StubProvider"]

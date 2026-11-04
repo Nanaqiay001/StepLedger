@@ -1,31 +1,31 @@
-"""存款兜底：档案没填时用模型识别出的余额，手填的永远优先。"""
+"""存款兜底：档案没填时用观察到的余额，手填的永远优先。
+
+余额现在由观察步给出（只读数、不评价），落进 `facts.goal`；说话步不再产出金额。
+"""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-import pytest
-
 from conftest import DATE
-from step_ledger.judge.prompt import parse_balance, parse_judgment_response
 from step_ledger.pipeline import run
 from step_ledger.shared.config import Config
 from step_ledger.shared.types import BalanceObs, Judgment, Observation
 
 
 class FakeProvider:
-    """假的模型：只关心它返回的 balance，用来验证管线侧的处理。"""
+    """假的模型：观察给一个余额，说话给固定两句话。"""
 
     def __init__(self, balance: int | None) -> None:
         self.balance = balance
 
     def observe(self, materials_text: str, date: str = "") -> Observation:
         return Observation(
-            balance=BalanceObs(value=self.balance, as_of=date, excerpt="余额", confidence="ok")
+            balance=BalanceObs(value=self.balance, as_of=date, excerpt="余额12864", confidence="ok")
         )
 
-    def judge(self, materials_dir: Path, profile, date: str = "") -> Judgment:
+    def speak(self, materials_dir: Path, profile, date: str = "", facts=None, trend=None) -> Judgment:
         return Judgment(
             summary="今天挺稳",
             advice="明天继续记一笔",
@@ -34,27 +34,7 @@ class FakeProvider:
         )
 
 
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [
-        ('{"summary": "a", "advice": "b", "balance": 12864}', 12864),
-        ('{"summary": "a", "advice": "b", "balance": "12,864.09"}', 12864),
-        ('{"summary": "a", "advice": "b", "balance": null}', None),
-        ('{"summary": "a", "advice": "b"}', None),
-    ],
-)
-def test_balance_comes_from_model_json(raw: str, expected: int | None) -> None:
-    assert parse_judgment_response(raw)[2] == expected
-
-
-def test_parse_balance_is_tolerant() -> None:
-    assert parse_balance("¥12,864.09 元") == 12864
-    assert parse_balance(12864.4) == 12864
-    assert parse_balance(None) is None
-    assert parse_balance("没写") is None
-
-
-def test_empty_profile_uses_model_balance(cfg: Config, monkeypatch) -> None:
+def test_empty_profile_uses_observed_balance(cfg: Config, monkeypatch) -> None:
     import step_ledger.pipeline as pipeline
 
     monkeypatch.setattr(pipeline, "_build_provider", lambda cfg, name: FakeProvider(12864))
@@ -70,7 +50,7 @@ def test_empty_profile_uses_model_balance(cfg: Config, monkeypatch) -> None:
     assert data["facts"]["goal"]["savings_source"] == "balance"
 
 
-def test_profile_savings_win_over_model(cfg: Config, monkeypatch) -> None:
+def test_profile_savings_win_over_observation(cfg: Config, monkeypatch) -> None:
     import step_ledger.pipeline as pipeline
 
     monkeypatch.setattr(pipeline, "_build_provider", lambda cfg, name: FakeProvider(12864))
@@ -83,3 +63,18 @@ def test_profile_savings_win_over_model(cfg: Config, monkeypatch) -> None:
     assert "¥200,000" in report
     assert "AI 从素材识别" not in report
 
+    data = json.loads((cfg.archive_for(DATE) / "judgment.json").read_text(encoding="utf-8"))
+    assert data["facts"]["goal"]["savings_source"] == "profile"
+
+
+def test_no_balance_and_no_profile_says_unknown(cfg: Config, monkeypatch) -> None:
+    import step_ledger.pipeline as pipeline
+
+    monkeypatch.setattr(pipeline, "_build_provider", lambda cfg, name: FakeProvider(None))
+
+    run(date=DATE, payload="午饭 30", provider="openai", config=cfg, echo=False)
+
+    data = json.loads((cfg.archive_for(DATE) / "judgment.json").read_text(encoding="utf-8"))
+    assert data["facts"]["goal"]["savings"] is None
+    assert data["facts"]["goal"]["savings_source"] == "none"
+    assert "未填写" in (cfg.archive_for(DATE) / "report.md").read_text(encoding="utf-8")

@@ -78,7 +78,7 @@ def test_empty_day_never_hits_the_model(cfg: Config, monkeypatch) -> None:
         calls.append(args)
         raise AssertionError("空素材不该调模型")
 
-    monkeypatch.setattr(OpenAICompatibleProvider, "judge", _boom)
+    monkeypatch.setattr(OpenAICompatibleProvider, "speak", _boom)
     monkeypatch.setattr(OpenAICompatibleProvider, "observe", _boom)
     result = run(date=DATE, config=cfg, provider="openai", echo=False)
 

@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 from ..shared.profile import Profile
-from ..shared.types import Judgment, Observation
+from ..shared.types import Facts, Judgment, Observation, TrendSummary
 
 
 class BaseProvider(ABC):
@@ -20,7 +20,15 @@ class BaseProvider(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def judge(self, materials_dir: Path, profile: Profile, date: str = "") -> Judgment:
+    def speak(
+        self,
+        materials_dir: Path,
+        profile: Profile,
+        date: str = "",
+        facts: Facts | None = None,
+        trend: TrendSummary | None = None,
+    ) -> Judgment:
+        """基于算好的事实写字。方法叫 speak 而不是 judge，是为了和层名区分。"""
         raise NotImplementedError
 
 

@@ -19,7 +19,7 @@ from ..base import BaseProvider, ProviderError
 from ..observe import OBSERVE_SYSTEM_PROMPT, build_observe_prompt, parse_observation_response
 from ..prompt import SYSTEM_PROMPT, build_prompt, parse_judgment_response, read_materials
 from ...shared.profile import Profile
-from ...shared.types import Judgment, Observation
+from ...shared.types import Facts, Judgment, Observation, TrendSummary
 
 
 class OpenAICompatibleProvider(BaseProvider):
@@ -45,14 +45,21 @@ class OpenAICompatibleProvider(BaseProvider):
         except ValueError as exc:
             raise ProviderError(str(exc)) from exc
 
-    def judge(self, materials_dir: Path, profile: Profile, date: str = "") -> Judgment:
+    def speak(
+        self,
+        materials_dir: Path,
+        profile: Profile,
+        date: str = "",
+        facts: Facts | None = None,
+        trend: TrendSummary | None = None,
+    ) -> Judgment:
         text, skipped = read_materials(materials_dir)
         files = [p for p in materials_dir.iterdir() if p.is_file() and p.name != "profile.md"] if materials_dir.is_dir() else []
-        prompt = build_prompt(profile, text, date, len(files))
+        prompt = build_prompt(profile, text, date, len(files), facts, trend)
 
         content, usage = self._chat(SYSTEM_PROMPT, prompt)
         try:
-            summary, advice, balance = parse_judgment_response(content)
+            summary, advice = parse_judgment_response(content)
         except ValueError as exc:
             raise ProviderError(str(exc)) from exc
 
@@ -65,9 +72,6 @@ class OpenAICompatibleProvider(BaseProvider):
                 "model": self.model,
                 "material_count": len(files),
                 "skipped": skipped,
-                # 模型从素材里读到的账户余额；没读到就是 None。
-                # 事实快照用 observe() 的结果，这个字段只为兼容旧归档保留。
-                "balance": balance,
                 # 顺手记下 token 用量，方便对账 / 看这次调用花了多少
                 "usage": usage,
             },
