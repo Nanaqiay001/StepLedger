@@ -162,12 +162,24 @@ def test_suspect_balance_is_flagged(tmp_path: Path) -> None:
     assert "余额待确认" in report
 
 
-def test_backfilled_facts_are_flagged(tmp_path: Path) -> None:
+def test_backfilled_facts_say_numbers_use_current_profile(tmp_path: Path) -> None:
     facts = _facts(backfilled=True)
 
     report = ConsoleChannel().render(_judgment(facts=facts), _ctx(tmp_path)).output
 
     assert "补跑" in report
+    assert "不是当天的档案" in report
+    assert "话是当初写的" not in report  # 这一天连同话一起重算过，不能这么说
+
+
+def test_facts_only_backfill_says_prose_is_old(tmp_path: Path) -> None:
+    facts = _facts(backfilled=True)
+
+    report = ConsoleChannel().render(
+        _judgment(facts=facts, runtime={"facts_backfilled": True}), _ctx(tmp_path)
+    ).output
+
+    assert "只补了数字" in report
     assert "话是当初写的" in report
 
 
@@ -179,3 +191,21 @@ def test_report_without_facts_still_renders(tmp_path: Path) -> None:
 
     assert "最近怎么样：稳" in report
     assert "未填写" in report
+
+
+def test_first_day_says_no_earlier_balance(tmp_path: Path) -> None:
+    """第一天只有一条余额，已花量不出来——别把它说成「没有余额」。"""
+    facts = _facts(
+        month=replace(
+            _facts().month,
+            baseline=None,
+            spent=None,
+            spent_as_of=None,
+            left=None,
+            partial=True,
+        )
+    )
+
+    report = ConsoleChannel().render(_judgment(facts=facts), _ctx(tmp_path)).output
+
+    assert "月初还没有更早的余额" in report

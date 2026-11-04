@@ -58,7 +58,7 @@ class ConsoleChannel(BaseChannel):
                 lines.append(_month_line(facts))
             if facts.pace is not None:
                 lines.append(_pace_line(facts.pace))
-            lines += _fact_notes(facts)
+            lines += _fact_notes(facts, prose_is_old=bool(judgment.runtime.get("facts_backfilled")))
         if judgment.runtime.get("profile_created"):
             lines += ["", "> 第一次见：把你的目标和存款写进 `materials/profile.md`，我下次就记住了。"]
         if judgment.degraded:
@@ -115,8 +115,12 @@ def _progress_line(percent: float | None) -> str:
 
 def _month_line(facts: Facts) -> str:
     month = facts.month
-    if month is None or month.spent is None:
-        return "- 本月已花：还没有余额，算不出来"
+    if month is None:
+        return "- 本月已花：算不出来"
+    if month.spent is None:
+        if month.baseline is None:
+            return "- 本月已花：月初还没有更早的余额，算不出来"
+        return f"- 本月已花：算不出来（只有 {month.baseline_date[5:]} 一条余额）"
     spent = f"已花 {format_money(month.spent)}"
     if month.spent_as_of and month.spent_as_of != facts.date:
         spent += f"（截至 {month.spent_as_of[5:]}）"
@@ -158,26 +162,31 @@ def _pace_line(pace: PaceFacts) -> str:
     return "- " + " ｜ ".join(parts)
 
 
-def _fact_notes(facts: Facts) -> list[str]:
-    """把「这个数是怎么来的」写清楚：可疑、补跑、缺余额，各有各的说法。"""
+def _fact_notes(facts: Facts, *, prose_is_old: bool = False) -> list[str]:
+    """把「这个数是怎么来的」写清楚：可疑、缺基线、补跑、只补了数字。
+
+    `prose_is_old` 只在「素材已清理、只补事实」时为真——那时话确实不是这一轮写的。
+    历史日重算（`--rebuild`）会连同话一起重写，不能说「话是当初写的」。
+    """
     notes: list[str] = []
     if facts.balance.confidence == "suspect":
         notes.append("> 余额待确认：摘录对不上原文，这一笔先按观察到的用。")
-    if facts.month is not None:
-        if facts.month.partial and facts.month.baseline_date:
-            notes.append(
-                f"> 月初没有余额快照，本月从 {facts.month.baseline_date[5:]} 起算，"
-                "后面漏跑的几天可能含上个月的尾巴。"
-            )
-        if (
-            facts.month.spent is not None
-            and facts.month.spent_as_of
-            and facts.month.spent_as_of != facts.date
-            and facts.month.left is None
-        ):
-            notes.append(f"> 今天没读到余额，已花算到 {facts.month.spent_as_of[5:]}。")
-    if facts.backfilled:
-        notes.append("> 补跑：数字按当前档案算，话是当初写的。")
+    if facts.month is not None and facts.month.partial and facts.month.baseline_date:
+        notes.append(
+            f"> 月初没有余额快照，本月从 {facts.month.baseline_date[5:]} 起算，"
+            "前面几天可能含上个月的尾巴。"
+        )
+    if facts.month is not None and (
+        facts.month.spent is not None
+        and facts.month.spent_as_of
+        and facts.month.spent_as_of != facts.date
+        and facts.month.left is None
+    ):
+        notes.append(f"> 今天没读到余额，已花算到 {facts.month.spent_as_of[5:]}。")
+    if prose_is_old:
+        notes.append("> 只补了数字，话是当初写的。")
+    elif facts.backfilled:
+        notes.append("> 补跑：数字按当前档案算，不是当天的档案。")
     return notes
 
 
