@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from ..base import BaseChannel
-from ..monthly import month_spend
+from ..monthly import month_spend, spend_plan
 from ..trend import write as write_trend
 from ...shared.profile import Profile, format_money, goal_plan
 from ...shared.types import Judgment, RenderContext, RenderResult
@@ -46,9 +46,9 @@ class ConsoleChannel(BaseChannel):
             f"- 还差：{'未知' if ctx.profile.distance is None else format_money(ctx.profile.distance)}",
             f"- 进度：{_progress_line(ctx.profile)}",
         ]
-        spending = month_spend(ctx.archive_dir.parent, ctx.date, ctx.profile)
+        spending = month_spend(ctx.archive_dir.parent, ctx.date)
         if spending is not None:
-            lines.append(self._month_line(spending))
+            lines.append(self._month_line(spending, spend_plan(ctx.profile, ctx.date, spending.net_out)))
         plan = goal_plan(ctx.profile, ctx.date)
         if plan is not None:
             lines.append(
@@ -63,15 +63,16 @@ class ConsoleChannel(BaseChannel):
         return "\n".join(lines) + "\n"
 
     @staticmethod
-    def _month_line(spending) -> str:  # noqa: ANN001 - 只在这个文件内部用
+    def _month_line(spending, plan) -> str:  # noqa: ANN001 - 只在这个文件内部用
         basis = f"{spending.since[5:]} 起算" if spending.partial else f"{spending.since[5:]}→{spending.until[5:]}"
-        line = f"- 本月净流出：{format_money(spending.net_out)}（{basis}，含自动转存）"
-        if spending.budget is not None:
-            line = (
-                f"- 本月净流出：{format_money(spending.net_out)} / 目标 "
-                f"{format_money(spending.budget)}（还剩 {format_money(spending.remaining)}）"
-            )
-        return line
+        if plan is None:
+            return f"- 本月已花：{format_money(spending.net_out)}（{basis}）"
+        head = (
+            f"- 本月可花：{format_money(plan.spendable)}"
+            f"（月收入 {format_money(plan.income)} − 需存 {format_money(plan.saving)}）；"
+            f"已花 {format_money(spending.net_out)}，"
+        )
+        return head + (f"已超 {format_money(-plan.left)}" if plan.short else f"还能花 {format_money(plan.left)}")
 
     def _milestones(self, ctx: RenderContext) -> str:
         entries = _history(ctx.archive_dir.parent)

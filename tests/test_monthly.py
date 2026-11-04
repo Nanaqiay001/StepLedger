@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from step_ledger.render.monthly import month_spend
+from step_ledger.render.monthly import month_spend, spend_plan
 from step_ledger.shared.profile import parse_profile
 
 
@@ -46,15 +46,40 @@ def test_missing_baseline_is_marked_partial(tmp_path: Path) -> None:
     assert result.net_out == 500
 
 
-def test_budget_is_optional(tmp_path: Path) -> None:
-    archive = _archive(tmp_path / "archive", {"2026-10-31": 12000, "2026-11-02": 11500})
-    profile = parse_profile("- 目标：100 万\n- 约定：月度支出目标 = 3000\n", tmp_path / "p.md")
+def test_spend_plan_derives_from_income_and_goal(tmp_path: Path) -> None:
+    """可花 = 月收入 −（每月需存 − 公积金月缴存）；不用手填预算。"""
+    raw = (
+        "- 目标：100 万\n- 当前存款：20 万\n"
+        "- 约定：目标日期 = 2030-12\n- 约定：月收入 = 16000\n- 约定：公积金月缴存 = 3468\n"
+    )
+    profile = parse_profile(raw, tmp_path / "p.md")
 
-    result = month_spend(archive, "2026-11-02", profile)
+    plan = spend_plan(profile, "2026-11-02", 200)
 
-    assert result is not None
-    assert result.budget == 3000
-    assert result.remaining == 2500
+    assert plan is not None
+    assert plan.saving == 16_327 - 3_468  # 每月需存里现金那部分
+    assert plan.spendable == 16_000 - plan.saving
+    assert plan.left == plan.spendable - 200
+    assert plan.short is False
+
+
+def test_spend_plan_needs_income(tmp_path: Path) -> None:
+    profile = parse_profile("- 目标：100 万\n- 当前存款：20 万\n- 约定：目标日期 = 2030-12\n", tmp_path / "p.md")
+    assert spend_plan(profile, "2026-11-02", 200) is None
+
+
+def test_spend_plan_flags_shortfall(tmp_path: Path) -> None:
+    raw = (
+        "- 目标：100 万\n- 当前存款：20 万\n"
+        "- 约定：目标日期 = 2026-12\n- 约定：月收入 = 16000\n"
+    )
+    profile = parse_profile(raw, tmp_path / "p.md")
+
+    plan = spend_plan(profile, "2026-11-02", 30_000)
+
+    assert plan is not None
+    assert plan.short is True
+    assert plan.left < 0
 
 
 def test_no_archive_means_no_claim(tmp_path: Path) -> None:

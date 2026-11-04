@@ -112,4 +112,4 @@ def test_report_shows_month_to_date(tmp_path: Path) -> None:
 
     report = ConsoleChannel().render(judgment, ctx).output
 
-    assert "本月净流出：¥300（10-31→11-02" in report
+    assert "本月已花：¥300（10-31→11-02）" in report
