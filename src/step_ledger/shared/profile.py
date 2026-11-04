@@ -140,10 +140,10 @@ def _remember_agreement(profile: Profile, text: str) -> None:
         profile.notes.append(text.strip())
 
 
-def goal_plan(profile: Profile, today: str) -> GoalPlan | None:
-    """读 `约定：目标日期 = 2030-12`，算出还剩几个月、每月要存多少（不计收益）。"""
-    match = _DEADLINE_RE.search(profile.agreements.get("目标日期", ""))
-    if not match or profile.distance is None:
+def months_until(agreements: dict[str, str], today: str) -> tuple[str, int] | None:
+    """读 `目标日期`，返回（截止月, 还剩几个月）。与存款无关，供 facts 复用。"""
+    match = _DEADLINE_RE.search(agreements.get("目标日期", ""))
+    if not match:
         return None
     year, month = int(match.group(1)), int(match.group(2))
     if not 1 <= month <= 12:
@@ -155,8 +155,18 @@ def goal_plan(profile: Profile, today: str) -> GoalPlan | None:
     months = (year - current.year) * 12 + (month - current.month)
     if months < 0:
         return None
-    months = max(months, 1)
-    return GoalPlan(deadline=f"{year}-{month:02d}", months=months, per_month=ceil(profile.distance / months))
+    return f"{year}-{month:02d}", max(months, 1)
+
+
+def goal_plan(profile: Profile, today: str) -> GoalPlan | None:
+    """读 `约定：目标日期 = 2030-12`，算出还剩几个月、每月要存多少（不计收益）。"""
+    if profile.distance is None:
+        return None
+    found = months_until(profile.agreements, today)
+    if found is None:
+        return None
+    deadline, months = found
+    return GoalPlan(deadline=deadline, months=months, per_month=ceil(profile.distance / months))
 
 
 def ensure_profile(path: Path) -> Profile:
