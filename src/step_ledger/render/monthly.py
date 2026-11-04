@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+from calendar import monthrange
 from dataclasses import dataclass
 from datetime import date as date_type
 from pathlib import Path
@@ -84,4 +85,60 @@ def spend_plan(profile: Profile | None, day: str, spent: int) -> SpendPlan | Non
     return SpendPlan(income=income, saving=saving, spendable=income - saving, spent=spent)
 
 
-__all__ = ["MonthSpend", "SpendPlan", "month_spend", "spend_plan"]
+__all__ = ["MonthSpend", "Pace", "SpendPlan", "day_spend", "month_spend", "pace", "spend_plan"]
+
+
+@dataclass(frozen=True)
+class Pace:
+    """把本月可花摊到每一天：今天该花多少、结余还是超支、明天该多少。"""
+
+    cap: int
+    days: int
+    day_index: int
+    quota: int              # 均摊日额度
+    allowed: int            # 到今天为止累计应花
+    spent: int              # 本月已花
+    today_spent: int | None # 今天花了多少（读不到就是 None）
+    tomorrow: int | None    # 明天额度：把剩余匀给剩下的天数
+
+    @property
+    def left(self) -> int:
+        return self.allowed - self.spent
+
+    @property
+    def over(self) -> bool:
+        return self.left < 0
+
+    @property
+    def month_over(self) -> bool:
+        return self.spent > self.cap
+
+
+def pace(plan: SpendPlan, day: str, today_spent: int | None) -> Pace:
+    today = date_type.fromisoformat(day)
+    days = monthrange(today.year, today.month)[1]
+    quota = round(plan.spendable / days)
+    allowed = round(plan.spendable * today.day / days)
+    rest = days - today.day
+    tomorrow = max(round((plan.spendable - plan.spent) / rest), 0) if rest > 0 else None
+    return Pace(
+        cap=plan.spendable,
+        days=days,
+        day_index=today.day,
+        quota=quota,
+        allowed=allowed,
+        spent=plan.spent,
+        today_spent=today_spent,
+        tomorrow=tomorrow,
+    )
+
+
+def day_spend(archive_root: Path, day: str) -> int | None:
+    """今天的净流出：上一个有余额的日子 → 今天。拿不到就是 None，不猜。"""
+    found = balances(archive_root)
+    if day not in found:
+        return None
+    earlier = sorted(d for d in found if d < day)
+    if not earlier:
+        return None
+    return found[earlier[-1]] - found[day]

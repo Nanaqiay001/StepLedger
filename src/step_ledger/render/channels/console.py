@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from ..base import BaseChannel
-from ..monthly import month_spend, spend_plan
+from ..monthly import day_spend, month_spend, pace, spend_plan
 from ..trend import write as write_trend
 from ...shared.profile import Profile, format_money, goal_plan
 from ...shared.types import Judgment, RenderContext, RenderResult
@@ -47,8 +47,12 @@ class ConsoleChannel(BaseChannel):
             f"- 进度：{_progress_line(ctx.profile)}",
         ]
         spending = month_spend(ctx.archive_dir.parent, ctx.date)
+        budget = spend_plan(ctx.profile, ctx.date, spending.net_out) if spending is not None else None
         if spending is not None:
-            lines.append(self._month_line(spending, spend_plan(ctx.profile, ctx.date, spending.net_out)))
+            lines.append(self._month_line(spending, budget))
+        if budget is not None:
+            today_out = day_spend(ctx.archive_dir.parent, ctx.date)
+            lines.append(self._pace_line(pace(budget, ctx.date, today_out)))
         plan = goal_plan(ctx.profile, ctx.date)
         if plan is not None:
             lines.append(
@@ -61,6 +65,27 @@ class ConsoleChannel(BaseChannel):
             lines += ["", "> 降级模式：AI 暂时不可用，这条是用本地模板说的，仅供参考。"]
         lines += ["", "_仅供参考，不构成投资建议。_"]
         return "\n".join(lines) + "\n"
+
+    @staticmethod
+    def _pace_line(p) -> str:  # noqa: ANN001 - 只在这个文件内部用
+        parts = [f"今日额度 {format_money(p.quota)}（{p.days} 天均摊）"]
+        if p.today_spent is None:
+            parts.append("今天还没记账")
+        else:
+            parts.append(f"今天花了 {format_money(p.today_spent)}")
+        if p.month_over:
+            parts.append(f"超 {format_money(-p.left)}，本月额度已用完")
+        elif p.over:
+            tail = f"超 {format_money(-p.left)}"
+            if p.tomorrow is not None:
+                tail += f"，明天降到 {format_money(p.tomorrow)} 匀回来"
+            parts.append(tail)
+        else:
+            tail = f"结余 {format_money(p.left)}"
+            if p.tomorrow is not None:
+                tail += f"，明天照 {format_money(p.tomorrow)}"
+            parts.append(tail)
+        return "- " + " ｜ ".join(parts)
 
     @staticmethod
     def _month_line(spending, plan) -> str:  # noqa: ANN001 - 只在这个文件内部用

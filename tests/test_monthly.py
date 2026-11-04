@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from step_ledger.render.monthly import month_spend, spend_plan
+from step_ledger.render.monthly import day_spend, month_spend, pace, spend_plan
 from step_ledger.shared.profile import parse_profile
 
 
@@ -84,3 +84,47 @@ def test_spend_plan_flags_shortfall(tmp_path: Path) -> None:
 
 def test_no_archive_means_no_claim(tmp_path: Path) -> None:
     assert month_spend(tmp_path / "archive", "2026-11-02") is None
+
+
+def test_pace_gives_daily_quota_and_tomorrow(tmp_path: Path) -> None:
+    raw = (
+        "- 目标：100 万\n- 当前存款：20 万\n"
+        "- 约定：目标日期 = 2030-12\n- 约定：月收入 = 16000\n- 约定：公积金月缴存 = 3468\n"
+    )
+    profile = parse_profile(raw, tmp_path / "p.md")
+    plan = spend_plan(profile, "2026-11-04", 220)
+
+    p = pace(plan, "2026-11-04", 85)
+
+    assert p.days == 30
+    assert p.day_index == 4
+    assert p.quota == round(plan.spendable / 30)
+    assert p.allowed == round(plan.spendable * 4 / 30)
+    assert p.left == p.allowed - 220
+    assert p.over is False
+    assert p.tomorrow == round((plan.spendable - 220) / 26)
+
+
+def test_pace_flags_overspend_and_month_over(tmp_path: Path) -> None:
+    raw = (
+        "- 目标：100 万\n- 当前存款：20 万\n"
+        "- 约定：目标日期 = 2030-12\n- 约定：月收入 = 16000\n- 约定：公积金月缴存 = 3468\n"
+    )
+    profile = parse_profile(raw, tmp_path / "p.md")
+    plan = spend_plan(profile, "2026-11-04", 220)
+
+    over = pace(spend_plan(profile, "2026-11-04", 1200), "2026-11-04", 900)
+    blown = pace(spend_plan(profile, "2026-11-04", plan.spendable + 500), "2026-11-04", 0)
+
+    assert over.over is True
+    assert over.month_over is False
+    assert over.tomorrow >= 0
+    assert blown.month_over is True
+    assert blown.tomorrow == 0
+
+
+def test_day_spend_uses_previous_balance(tmp_path: Path) -> None:
+    archive = _archive(tmp_path / "archive", {"2026-11-02": 12000, "2026-11-03": 11800})
+
+    assert day_spend(archive, "2026-11-03") == 200
+    assert day_spend(archive, "2026-11-01") is None

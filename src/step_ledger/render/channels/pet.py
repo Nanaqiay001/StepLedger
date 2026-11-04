@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from ..base import BaseChannel
+from ..monthly import day_spend, month_spend, pace, spend_plan
 from ...shared.profile import Profile, format_money
 from ...shared.types import Judgment, RenderContext, RenderResult
 
@@ -151,6 +152,29 @@ def _find_entry(payload: dict[str, Any], pet_id: str) -> dict[str, Any] | None:
     return None
 
 
+def _rhythm(ctx: RenderContext) -> str | None:
+    """本月节奏是算出来的，不是模型说的：额度、超没超、明天该多少。"""
+    spending = month_spend(ctx.archive_dir.parent, ctx.date)
+    if spending is None:
+        return None
+    budget = spend_plan(ctx.profile, ctx.date, spending.net_out)
+    if budget is None:
+        return None
+    p = pace(budget, ctx.date, day_spend(ctx.archive_dir.parent, ctx.date))
+    head = f"- 本月节奏：可花 {format_money(p.cap)} / 已花 {format_money(p.spent)}"
+    if p.month_over:
+        return head + f"，本月已经超了 {format_money(p.spent - p.cap)}，这几天得收着点"
+    if p.over:
+        tail = f"，今天超了 {format_money(-p.left)}"
+        if p.tomorrow is not None:
+            tail += f"，明天额度降到 {format_money(p.tomorrow)} 才能匀回来"
+        return head + tail
+    tail = f"，今天还剩 {format_money(p.left)} 额度"
+    if p.tomorrow is not None:
+        tail += f"，明天照 {format_money(p.tomorrow)}"
+    return head + tail
+
+
 def build_brief(
     judgment: Judgment,
     ctx: RenderContext,
@@ -180,6 +204,9 @@ def build_brief(
         f"- 进度：{progress}（存款 {savings} / 目标 {target}）",
         f"- 素材：{ctx.material_count} 份",
     ]
+    rhythm = _rhythm(ctx)
+    if rhythm is not None:
+        lines.append(rhythm)
     if judgment.degraded:
         lines.append("- ⚠️ 降级模式：判断来自本地模板，别说得太笃定")
     lines += [
