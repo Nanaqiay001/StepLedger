@@ -32,6 +32,9 @@ class ConsoleChannel(BaseChannel):
 
         if ctx.echo:
             print(report)
+            chart = next((path for path in artifacts if path.suffix == ".svg"), None)
+            if chart is not None:
+                print(f"图表：{chart}（同目录还有 trend.csv）")
         return RenderResult(channel=self.name, output=report, artifacts=artifacts)
 
     def _report(self, judgment: Judgment, ctx: RenderContext) -> str:

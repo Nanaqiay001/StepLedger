@@ -209,3 +209,25 @@ def test_first_day_says_no_earlier_balance(tmp_path: Path) -> None:
     report = ConsoleChannel().render(_judgment(facts=facts), _ctx(tmp_path)).output
 
     assert "月初还没有更早的余额" in report
+
+
+def test_echo_points_at_the_chart(tmp_path: Path, capsys) -> None:
+    """终端输出里要提一句图表在哪，否则没人知道它生成了。"""
+    ctx = _ctx(tmp_path)
+    ctx.echo = True
+    trend = TrendSummary(days=[DayPoint(day="2026-10-28", balance=11000)])
+
+    ConsoleChannel().render(_judgment(trend=trend), ctx)
+
+    out = capsys.readouterr().out
+    assert "图表：" in out
+    assert "trend.svg" in out
+
+
+def test_no_chart_no_line(tmp_path: Path, capsys) -> None:
+    ctx = _ctx(tmp_path)
+    ctx.echo = True
+
+    ConsoleChannel().render(_judgment(), ctx)  # 没有余额点，不画图
+
+    assert "图表：" not in capsys.readouterr().out
