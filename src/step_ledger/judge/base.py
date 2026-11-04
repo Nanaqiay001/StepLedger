@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 from ..shared.profile import Profile
-from ..shared.types import Judgment
+from ..shared.types import Facts, Judgment, Observation, TrendSummary
 
 
 class BaseProvider(ABC):
@@ -15,7 +15,20 @@ class BaseProvider(ABC):
     name: str = "base"
 
     @abstractmethod
-    def judge(self, materials_dir: Path, profile: Profile, date: str = "") -> Judgment:
+    def observe(self, materials_text: str, date: str = "") -> Observation:
+        """只读余额，不评价。核验由 judge/observe.py 的 verify() 统一做。"""
+        raise NotImplementedError
+
+    @abstractmethod
+    def speak(
+        self,
+        materials_dir: Path,
+        profile: Profile,
+        date: str = "",
+        facts: Facts | None = None,
+        trend: TrendSummary | None = None,
+    ) -> Judgment:
+        """基于算好的事实写字。方法叫 speak 而不是 judge，是为了和层名区分。"""
         raise NotImplementedError
 
 

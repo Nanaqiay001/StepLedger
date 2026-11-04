@@ -30,7 +30,7 @@ def test_end_to_end_archives_everything(cfg: Config, normal_day: Path) -> None:
     assert result.judgment is not None
     assert result.judgment.summary.strip()
     assert result.judgment.advice.strip()
-    assert result.judgment.meta["date"] == DATE
+    assert result.judgment.facts.date == DATE
     assert "午饭外卖" in result.judgment.prompt
 
 
@@ -48,7 +48,7 @@ def test_judgment_json_contract(cfg: Config, normal_day: Path) -> None:
     assert data["summary"].strip()
     assert data["advice"].strip()
     assert isinstance(data["degraded"], bool)
-    assert data["meta"]["progress"]["target"] == 1_000_000
+    assert data["facts"]["goal"]["target"] == 1_000_000
 
 
 def test_same_day_rerun_is_idempotent(cfg: Config, normal_day: Path) -> None:
@@ -78,15 +78,16 @@ def test_empty_day_never_hits_the_model(cfg: Config, monkeypatch) -> None:
         calls.append(args)
         raise AssertionError("空素材不该调模型")
 
-    monkeypatch.setattr(OpenAICompatibleProvider, "judge", _boom)
+    monkeypatch.setattr(OpenAICompatibleProvider, "speak", _boom)
+    monkeypatch.setattr(OpenAICompatibleProvider, "observe", _boom)
     result = run(date=DATE, config=cfg, provider="openai", echo=False)
 
     assert calls == []
     assert result.judgment is not None
     assert result.judgment.degraded is False
-    assert result.judgment.meta["provider"] == "none"
-    assert result.judgment.meta["requested_provider"] == "openai"
-    assert result.judgment.meta["material_count"] == 0
+    assert result.judgment.runtime["provider"] == "none"
+    assert result.judgment.runtime["requested_provider"] == "openai"
+    assert result.judgment.runtime["material_count"] == 0
     assert "今天没有记录" in (_artifacts(cfg) / "report.md").read_text(encoding="utf-8")
 
 
@@ -111,7 +112,7 @@ def test_cli_json_stdout_stays_pure(tmp_path: Path, capsys) -> None:
     assert code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["date"] == DATE
-    assert payload["judgment"]["meta"]["provider"] == "none"
+    assert payload["judgment"]["runtime"]["provider"] == "none"
 
 
 def test_agent_style_natural_language_payload(cfg: Config) -> None:
@@ -138,7 +139,7 @@ def test_render_stage_refreshes_progress_snapshot(cfg: Config, normal_day: Path)
     run(date=DATE, stage="render", config=cfg, echo=False)
 
     data = json.loads((_artifacts(cfg) / "judgment.json").read_text(encoding="utf-8"))
-    assert data["meta"]["progress"]["savings"] == 120_000
+    assert data["facts"]["goal"]["savings"] == 120_000
     milestones = (_artifacts(cfg) / "milestones.md").read_text(encoding="utf-8")
     assert "¥120,000" in milestones
 
@@ -155,3 +156,52 @@ def test_stages_are_resumable(cfg: Config) -> None:
     run(date=DATE, stage="render", config=cfg, echo=False)
     assert (_artifacts(cfg) / "report.md").is_file()
     assert (_artifacts(cfg) / "milestones.md").is_file()
+
+
+def test_render_stage_backfills_legacy_prose_intact(cfg: Config) -> None:
+    """旧归档没有事实快照、素材也清了：只补数字，别把当初写的话换掉。"""
+    archive = _artifacts(cfg)
+    archive.mkdir(parents=True)
+    (archive / "judgment.json").write_text(
+        json.dumps({"summary": "当初写的", "advice": "当初的建议", "prompt": "old"}),
+        encoding="utf-8",
+    )
+
+    run(date=DATE, stage="render", config=cfg, echo=False)
+
+    data = json.loads((archive / "judgment.json").read_text(encoding="utf-8"))
+    assert data["summary"] == "当初写的"
+    assert data["facts"]["date"] == DATE
+    assert data["facts"]["backfilled"] is True
+    assert data["runtime"]["facts_backfilled"] is True
+
+
+def test_rebuild_walks_every_archived_day(cfg: Config) -> None:
+    from step_ledger.pipeline import rebuild
+
+    for day in ("2026-10-26", "2026-10-27"):
+        target = cfg.archive_for(day)
+        target.mkdir(parents=True)
+        (target / "judgment.json").write_text(
+            json.dumps({"summary": "s", "advice": "a", "meta": {"date": day}}),
+            encoding="utf-8",
+        )
+
+    results = rebuild(root=cfg.root, provider="stub")
+
+    assert len(results) == 2
+    for day in ("2026-10-26", "2026-10-27"):
+        data = json.loads((cfg.archive_for(day) / "judgment.json").read_text(encoding="utf-8"))
+        assert data["facts"] is not None
+        assert data["summary"] == "s"  # 没素材，保留原文
+
+
+def test_render_package_cannot_read_history() -> None:
+    """结构守卫：渲染渠道不许自己翻 archive，数字只能从 Judgment 来。"""
+    render_root = Path(__file__).resolve().parents[1] / "src" / "step_ledger" / "render"
+    for path in render_root.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        assert "judge.history" not in text, path
+        assert "judge.facts" not in text, path
+        assert "judgment.json" not in text, path  # 不许自己翻历史
+        assert "from ..monthly" not in text, path  # 算术语已删除

@@ -1,5 +1,6 @@
-"""趋势图：从归档里的 `meta.balance` 拼出余额序列，落成 SVG + CSV。
+"""趋势图：把判断层算好的余额序列落成 SVG + CSV。
 
+这里只做画图，不读归档、不算余额——数据由 `judgment.trend.days` 带过来。
 只用标准库和两种标准格式：SVG（W3C 矢量图，坐标精确、浏览器/预览器都能开）和
 CSV（任何表格工具都能再画一次）。不引图表库，也不画字符画——字符画对齐靠字体，
 换台机器就歪了。
@@ -7,13 +8,11 @@ CSV（任何表格工具都能再画一次）。不引图表库，也不画字�
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
-from datetime import date as date_type
-from datetime import timedelta
 from pathlib import Path
 
-WINDOW_DAYS = 14
+from ..shared.types import DayPoint
+
 WIDTH, HEIGHT = 760, 340
 PAD_L, PAD_R, PAD_T, PAD_B = 64, 28, 44, 48
 
@@ -22,41 +21,6 @@ PAD_L, PAD_R, PAD_T, PAD_B = 64, 28, 44, 48
 class Point:
     day: str
     value: int | None
-
-
-def balances(archive_root: Path) -> dict[str, int]:
-    """归档里每天的卡内余额快照（没有余额的日子不出现）。"""
-    found: dict[str, int] = {}
-    if not archive_root.is_dir():
-        return found
-    for day_dir in sorted(archive_root.iterdir()):
-        path = day_dir / "judgment.json"
-        if not path.is_file():
-            continue
-        try:
-            meta = json.loads(path.read_text(encoding="utf-8")).get("meta") or {}
-        except (OSError, json.JSONDecodeError):
-            continue
-        balance = meta.get("balance")
-        if isinstance(balance, (int, float)) and not isinstance(balance, bool):
-            found[day_dir.name] = int(balance)
-    return found
-
-
-def series(archive_root: Path, days: int = WINDOW_DAYS) -> list[Point]:
-    """读归档里的余额快照，按自然日补空（没跑管线的日子是断点，不是 0）。"""
-    found = balances(archive_root)
-    if not found:
-        return []
-
-    first_known = min(date_type.fromisoformat(day) for day in found)
-    last = max(date_type.fromisoformat(day) for day in found)
-    first = max(first_known, last - timedelta(days=days - 1))
-    points: list[Point] = []
-    for offset in range((last - first).days + 1):
-        day = (first + timedelta(days=offset)).isoformat()
-        points.append(Point(day=day, value=found.get(day)))
-    return points
 
 
 def to_csv(points: list[Point]) -> str:
@@ -124,12 +88,9 @@ def to_svg(points: list[Point], title: str = "卡内余额") -> str:
             )
         for px, py, value, day in run:
             parts.append(f'<circle cx="{px:.1f}" cy="{py:.1f}" r="3.4" fill="#c2703d"/>')
-            parts.append(
-                f'<title>{day} ¥{value:,}</title>'
-            )
+            parts.append(f'<title>{day} ¥{value:,}</title>')
 
-    labels = _label_indexes(len(points))
-    for index in labels:
+    for index in _label_indexes(len(points)):
         parts.append(
             f'<text x="{x(index):.1f}" y="{HEIGHT - PAD_B + 22}" font-size="11" '
             f'fill="#8a8577" text-anchor="middle">{points[index].day[5:]}</text>'
@@ -144,10 +105,10 @@ def to_svg(points: list[Point], title: str = "卡内余额") -> str:
     return "\n".join(parts) + "\n"
 
 
-def write(archive_root: Path, target_dir: Path) -> list[Path]:
+def write(days: list[DayPoint], target_dir: Path) -> list[Path]:
     """把 `trend.svg` 与 `trend.csv` 写进当天的归档目录，返回产物路径。"""
-    points = series(archive_root)
-    if not points:
+    points = [Point(day=day.day, value=day.balance) for day in days]
+    if not any(point.value is not None for point in points):
         return []
     target_dir.mkdir(parents=True, exist_ok=True)
     svg_path = target_dir / "trend.svg"
@@ -181,4 +142,4 @@ def _empty_svg(title: str) -> str:
     )
 
 
-__all__ = ["Point", "series", "to_csv", "to_svg", "write"]
+__all__ = ["Point", "to_csv", "to_svg", "write"]

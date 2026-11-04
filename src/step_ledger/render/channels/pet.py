@@ -24,9 +24,8 @@ from pathlib import Path
 from typing import Any
 
 from ..base import BaseChannel
-from ..monthly import day_spend, month_spend, pace, spend_plan
 from ...shared.profile import Profile, format_money
-from ...shared.types import Judgment, RenderContext, RenderResult
+from ...shared.types import Facts, Judgment, RenderContext, RenderResult
 
 BUBBLE_LIMIT = 60
 REQUEST_TIMEOUT = 1.5
@@ -152,26 +151,26 @@ def _find_entry(payload: dict[str, Any], pet_id: str) -> dict[str, Any] | None:
     return None
 
 
-def _rhythm(ctx: RenderContext) -> str | None:
-    """本月节奏是算出来的，不是模型说的：额度、超没超、明天该多少。"""
-    spending = month_spend(ctx.archive_dir.parent, ctx.date)
-    if spending is None:
+def _rhythm(facts: Facts | None) -> str | None:
+    """本月节奏直接引用算好的事实：不在这里做任何运算。"""
+    if facts is None or facts.month is None:
         return None
-    budget = spend_plan(ctx.profile, ctx.date, spending.net_out)
-    if budget is None:
+    month, pace_facts = facts.month, facts.pace
+    if month.spendable is None or month.spent is None:
         return None
-    p = pace(budget, ctx.date, day_spend(ctx.archive_dir.parent, ctx.date))
-    head = f"- 本月节奏：可花 {format_money(p.cap)} / 已花 {format_money(p.spent)}"
-    if p.month_over:
-        return head + f"，本月已经超了 {format_money(p.spent - p.cap)}，这几天得收着点"
-    if p.over:
-        tail = f"，今天超了 {format_money(-p.left)}"
-        if p.tomorrow is not None:
-            tail += f"，明天额度降到 {format_money(p.tomorrow)} 才能匀回来"
+    head = f"- 本月节奏：可花 {format_money(month.spendable)} / 已花 {format_money(month.spent)}"
+    if month.short and month.left is not None:
+        return head + f"，本月已经超了 {format_money(-month.left)}，这几天得收着点"
+    if pace_facts is None:
+        return head
+    if pace_facts.over:
+        tail = f"，今天超了 {format_money(-pace_facts.left)}"
+        if pace_facts.tomorrow is not None:
+            tail += f"，明天额度降到 {format_money(pace_facts.tomorrow)} 才能匀回来"
         return head + tail
-    tail = f"，今天还剩 {format_money(p.left)} 额度"
-    if p.tomorrow is not None:
-        tail += f"，明天照 {format_money(p.tomorrow)}"
+    tail = f"，今天还剩 {format_money(pace_facts.left)} 额度"
+    if pace_facts.tomorrow is not None:
+        tail += f"，明天照 {format_money(pace_facts.tomorrow)}"
     return head + tail
 
 
@@ -184,16 +183,20 @@ def build_brief(
     tiers: tuple[str, ...] = DEFAULT_TIERS,
 ) -> str:
     """给宿主 agent 的播报简报：事实 + 可发挥的空间 + 一条能照抄的命令。"""
-    percent = ctx.profile.percent
+    facts = judgment.facts
+    date = facts.date if facts is not None else ""
+    percent = facts.goal.percent if facts is not None else None
+    savings_value = facts.goal.savings if facts is not None else None
+    target_value = facts.goal.target if facts is not None else 0
     progress = "未填写存款" if percent is None else f"{percent * 100:.1f}%"
-    savings = format_money(ctx.profile.savings) if ctx.profile.savings is not None else "未填写"
-    target = format_money(ctx.profile.target)
+    savings = format_money(savings_value) if savings_value is not None else "未填写"
+    target = format_money(target_value)
     suggested = pick_animation(percent, tiers) or "（这次不推荐档位，随你挑）"
-    style_name, style_hint = style_for(ctx.date)
-    said = recent_said(ctx.archive_dir)
+    style_name, style_hint = style_for(date)
+    said = ctx.recent_said
 
     lines = [
-        f"# 桌宠播报简报 · {ctx.date}",
+        f"# 桌宠播报简报 · {date}",
         "",
         "这条是渲染层交给**宿主 agent** 的活：判断层已经把今天说完，怎么让它开口由你定。",
         "别自己拼 HTTP —— 锁、surface 匹配、长轮询、释放都在脚本里，拼错会静默失败。",
@@ -202,9 +205,9 @@ def build_brief(
         f"- 总结：{judgment.summary}",
         f"- 建议：{judgment.advice}",
         f"- 进度：{progress}（存款 {savings} / 目标 {target}）",
-        f"- 素材：{ctx.material_count} 份",
+        f"- 素材：{judgment.runtime.get('material_count', 0)} 份",
     ]
-    rhythm = _rhythm(ctx)
+    rhythm = _rhythm(facts)
     if rhythm is not None:
         lines.append(rhythm)
     if judgment.degraded:
@@ -433,18 +436,18 @@ class PetChannel(BaseChannel):
 
     def render(self, judgment: Judgment, ctx: RenderContext) -> RenderResult:
         if not self.base_url:
-            self._log(ctx.archive_dir, "pet：未配置 PET_BASE_URL，跳过")
+            self._log(ctx.out_dir, "pet：未配置 PET_BASE_URL，跳过")
             return RenderResult(channel=self.name, output="未配置 PET_BASE_URL，跳过")
         if not is_loopback(self.base_url):
-            self._log(ctx.archive_dir, "pet：PET_BASE_URL 不是本机地址，跳过")
+            self._log(ctx.out_dir, "pet：PET_BASE_URL 不是本机地址，跳过")
             return RenderResult(channel=self.name, output="PET_BASE_URL 必须是本机地址，跳过")
-        if ctx.material_count == 0:
-            self._log(ctx.archive_dir, "pet：今天没有素材，跳过播报")
+        if judgment.runtime.get("material_count", 0) == 0:
+            self._log(ctx.out_dir, "pet：今天没有素材，跳过播报")
             return RenderResult(channel=self.name, output="今天没有素材，跳过播报")
 
         brief = build_brief(judgment, ctx, base_url=self.base_url, pet_id=self.pet_id, tiers=self.tiers)
-        ctx.archive_dir.mkdir(parents=True, exist_ok=True)
-        path = ctx.archive_dir / "pet_task.md"
+        ctx.out_dir.mkdir(parents=True, exist_ok=True)
+        path = ctx.out_dir / "pet_task.md"
         path.write_text(brief, encoding="utf-8")
         if ctx.echo:
             print(f"桌宠简报：{path}（读它，用 scripts/pet_play.py 播报）")
