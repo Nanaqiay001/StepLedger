@@ -3,6 +3,16 @@
 ## Changelog
 
 ### 2026-11-04
+- **判断层接线：秘书上岗**。新增 `judge/secretary.py`，判断层内部变成
+  `观察（LLM）→ 计算（代码）→ 统计趋势（代码）→ 说话（LLM）`。`Judgment` 换成
+  `facts / trend / observation / runtime`，`meta` 退役（旧归档读取时自动迁移到 runtime）。
+  渲染层的目标四项改读 `facts.goal`，里程碑兼容旧 `meta.progress`
+- **重算为准的落地**：`--stage render` 在「档案比 judgment 新」或「旧归档没有事实快照」时重算，
+  分两种模式——`judge`（整份重算，数字与话同源）与 `facts`（只补事实）。
+  后者专治旧归档：素材已清理时**不能用模板话覆盖当初模型写的**，补完标 `runtime.facts_backfilled`
+- **降级路径第一次有数字**：观察失败 → 已花退回「上一个有余额的日子」并标 `spent_as_of`；
+  说话失败 → 用 stub 的话，但事实仍然权威。`runtime.steps` 记录每步 ok/stub/failed/skipped
+- 测试 157 项全过（新增 9 项秘书用例）
 - **设计文档：判断层扩展为「秘书」（草案 v2，待讨论）**。新增 `docs/feature-judge-secretary.md`：
   管线仍是三层，判断层内部变成 `观察（LLM）→ 计算（代码）→ 统计趋势（代码）→ 说话（LLM）`。
   「本月已花 / 今日额度 / 明天该多少」仍由代码算，但算在判断层里，`Judgment.facts` 携带，
@@ -196,6 +206,30 @@
 - 填充 docs/rfc.md（架构设计文档 — 四阶段管线）
 - 填充 docs/test.md（测试策略）
 - 填充 skills/StepLedger.md（Skill 定义）
+
+## 决策记录（issue #13 施工期）
+
+> 用户授权：施工期自主判断，按既有偏好决定，但必须可追溯。以下每条都写了理由与代价。
+
+- **D1 不冻结，重算为准**（11-04 21:05）。原设计让月计划「同月只算一次」，用户指出这与
+  「重算为准」冲突。改为：`judgment.json` 是缓存，重算即最新值；但**重算单位是一整天的判断**
+  （facts + prose 同源），否则会出现「报告说 A、建议按 B」。代价：改档案后重算历史日，
+  额度会变——用户明确接受这个误差。
+- **D2 观察与说话分成两次模型调用**（21:08）。事实必须排在说话之前，否则 advice 不知道额度。
+  代价：每天两次调用；观察的 prompt 只回一个 JSON。已写入 feature 文档。
+- **D3 摘录核验放在 secretary，不放在 provider**（21:10）。provider 只负责解析模型输出；
+  核验是纯代码、与 provider 无关，放一处避免 stub / openai 各写一遍。
+- **D4 观察温度 0、说话温度 0.7**（21:11）。抽取要稳，说话要有人味。同一个 `_chat()`
+  两个温度，不引第二套 HTTP 逻辑。
+- **D5 旧归档补事实不覆盖原文**（21:40）。实测发现：旧归档缺事实、素材又被清理时，
+  整份重算会把模型写过的 summary 换成 stub 的「今天没有记录」。改为只补 `facts`/`trend`，
+  保留原文并标 `facts_backfilled: true`。代价：这一天「数字与话同源」不成立，所以必须留痕。
+- **D6 `backfilled` 用「比今天早」判定**（21:38）。补跑语义只需区分「按当前档案算出来的历史日」，
+  不需要更精确的因果；用一个日期比较就够，不引额外状态。
+- **D7 `--stage render` 触发重算分两档**（21:41）。素材还在 → 整份重算（话也重写）；
+  素材没了 → 只补事实。判据是 `material_files(materials_dir)` 是否为空，不猜。
+- **D8 `Judgment` 挪到 `types.py` 末尾**（21:30）。它现在引用 `Facts` / `TrendSummary`，
+  Python 是运行时求值默认参数，前置定义会 NameError；挪到文件末尾比加字符串注解更直接。
 
 ## Lessons Learned
 
