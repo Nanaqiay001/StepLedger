@@ -10,7 +10,7 @@ from pathlib import Path
 from ..base import BaseProvider
 from ..prompt import build_prompt, read_materials
 from ...shared.profile import Profile, format_money
-from ...shared.types import Judgment
+from ...shared.types import Judgment, Observation
 
 _SPEND_HINTS = ("支出", "花了", "付款", "消费", "买", "打车", "外卖", "房租")
 _INCOME_HINTS = ("收入", "工资", "到账", "退款", "报销", "奖金")
@@ -18,6 +18,10 @@ _INCOME_HINTS = ("收入", "工资", "到账", "退款", "报销", "奖金")
 
 class StubProvider(BaseProvider):
     name = "stub"
+
+    def observe(self, materials_text: str, date: str = "") -> Observation:
+        """不猜数：读不出来就是读不出来，交给历史余额兜底。"""
+        return Observation()
 
     def judge(self, materials_dir: Path, profile: Profile, date: str = "") -> Judgment:
         text, skipped = read_materials(materials_dir)
