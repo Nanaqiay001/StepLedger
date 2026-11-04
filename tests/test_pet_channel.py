@@ -26,7 +26,7 @@ from step_ledger.render.channels.pet import (
 )
 from step_ledger.shared.config import Config
 from step_ledger.shared.profile import parse_profile
-from step_ledger.shared.types import Judgment, RenderContext
+from step_ledger.shared.types import Facts, GoalFacts, Judgment, RenderContext
 
 BASE = "http://127.0.0.1:9/dsh-pet-7340"
 def _load_pet_daily():
@@ -136,19 +136,33 @@ def fake(monkeypatch: pytest.MonkeyPatch) -> FakePet:
     return pet
 
 
-def _judgment(summary: str = "今天工资到账，账面上先亮了一下。", advice: str = "先把一小笔挪走。") -> Judgment:
-    return Judgment(summary=summary, advice=advice)
+def _facts(savings: int = 200_000) -> Facts:
+    return Facts(
+        date="2026-10-28",
+        goal=GoalFacts(
+            target=1_000_000,
+            savings=savings,
+            savings_source="profile",
+            distance=max(1_000_000 - savings, 0),
+            percent=savings / 1_000_000,
+        ),
+    )
+
+
+def _judgment(
+    summary: str = "今天工资到账，账面上先亮了一下。", advice: str = "先把一小笔挪走。"
+) -> Judgment:
+    return Judgment(
+        summary=summary,
+        advice=advice,
+        facts=_facts(),
+        runtime={"material_count": 2},
+    )
 
 
 def _ctx(tmp_path: Path, savings: int = 200_000) -> RenderContext:
-    profile = parse_profile(f"- 目标：100 万\n- 当前存款：{savings}\n", tmp_path / "profile.md")
-    return RenderContext(
-        date="2026-10-28",
-        archive_dir=tmp_path / "archive" / "2026-10-28",
-        profile=profile,
-        material_count=2,
-        echo=False,
-    )
+    out = tmp_path / "archive" / "2026-10-28"
+    return RenderContext(out_dir=out, echo=False, recent_said=recent_said(out))
 
 
 # ── 文案与档位 ──────────────────────────────────────────────────
@@ -221,13 +235,14 @@ def test_brief_has_no_sample_line_and_rotates_style(tmp_path: Path) -> None:
 
 
 def test_brief_lists_recent_lines(tmp_path: Path) -> None:
+    out = tmp_path / "archive" / "2026-10-28"
+    record_said(out.parent / "2026-10-29", "昨天那句", "照镜子")
     ctx = _ctx(tmp_path)
-    record_said(ctx.archive_dir.parent / "2026-10-29", "昨天那句", "照镜子")
 
     brief = build_brief(_judgment(), ctx, base_url=BASE, pet_id="main")
 
     assert "昨天那句" in brief
-    assert recent_said(ctx.archive_dir) == ["昨天那句（照镜子）"]
+    assert recent_said(out) == ["昨天那句（照镜子）"]
 
 
 def test_record_said_appends(tmp_path: Path) -> None:
@@ -265,10 +280,10 @@ def test_channel_skips_without_base_url(tmp_path: Path, fake: FakePet) -> None:
 
 
 def test_channel_silent_on_empty_day(tmp_path: Path, fake: FakePet) -> None:
-    ctx = _ctx(tmp_path)
-    ctx.material_count = 0
+    judgment = _judgment()
+    judgment.runtime = {"material_count": 0}
 
-    result = PetChannel(BASE).render(_judgment(), ctx)
+    result = PetChannel(BASE).render(judgment, _ctx(tmp_path))
 
     assert "没有素材" in result.output
     assert not (tmp_path / "archive" / "2026-10-28" / "pet_task.md").exists()

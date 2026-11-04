@@ -156,3 +156,52 @@ def test_stages_are_resumable(cfg: Config) -> None:
     run(date=DATE, stage="render", config=cfg, echo=False)
     assert (_artifacts(cfg) / "report.md").is_file()
     assert (_artifacts(cfg) / "milestones.md").is_file()
+
+
+def test_render_stage_backfills_legacy_prose_intact(cfg: Config) -> None:
+    """旧归档没有事实快照、素材也清了：只补数字，别把当初写的话换掉。"""
+    archive = _artifacts(cfg)
+    archive.mkdir(parents=True)
+    (archive / "judgment.json").write_text(
+        json.dumps({"summary": "当初写的", "advice": "当初的建议", "prompt": "old"}),
+        encoding="utf-8",
+    )
+
+    run(date=DATE, stage="render", config=cfg, echo=False)
+
+    data = json.loads((archive / "judgment.json").read_text(encoding="utf-8"))
+    assert data["summary"] == "当初写的"
+    assert data["facts"]["date"] == DATE
+    assert data["facts"]["backfilled"] is True
+    assert data["runtime"]["facts_backfilled"] is True
+
+
+def test_rebuild_walks_every_archived_day(cfg: Config) -> None:
+    from step_ledger.pipeline import rebuild
+
+    for day in ("2026-10-26", "2026-10-27"):
+        target = cfg.archive_for(day)
+        target.mkdir(parents=True)
+        (target / "judgment.json").write_text(
+            json.dumps({"summary": "s", "advice": "a", "meta": {"date": day}}),
+            encoding="utf-8",
+        )
+
+    results = rebuild(root=cfg.root, provider="stub")
+
+    assert len(results) == 2
+    for day in ("2026-10-26", "2026-10-27"):
+        data = json.loads((cfg.archive_for(day) / "judgment.json").read_text(encoding="utf-8"))
+        assert data["facts"] is not None
+        assert data["summary"] == "s"  # 没素材，保留原文
+
+
+def test_render_package_cannot_read_history() -> None:
+    """结构守卫：渲染渠道不许自己翻 archive，数字只能从 Judgment 来。"""
+    render_root = Path(__file__).resolve().parents[1] / "src" / "step_ledger" / "render"
+    for path in render_root.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        assert "judge.history" not in text, path
+        assert "judge.facts" not in text, path
+        assert "judgment.json" not in text, path  # 不许自己翻历史
+        assert "from ..monthly" not in text, path  # 算术语已删除

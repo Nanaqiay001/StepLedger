@@ -25,7 +25,7 @@ from .judge.history import History
 from .judge.providers.openai_compatible import OpenAICompatibleProvider
 from .judge.providers.stub import StubProvider
 from .render.channels.console import ConsoleChannel
-from .render.channels.pet import PetChannel
+from .render.channels.pet import PetChannel, recent_said
 from .shared.config import Config
 from .shared.profile import Profile, ensure_profile, load_profile
 from .shared.types import CollectResult, Judgment, PipelineResult, RenderContext, RenderResult
@@ -41,6 +41,7 @@ def run(
     sources: list[str | Path] | None = None,
     echo: bool = True,
     config: Config | None = None,
+    force: bool = False,
 ) -> PipelineResult:
     cfg = config or Config.load(root)
     run_date = date or date_type.today().isoformat()
@@ -65,7 +66,9 @@ def run(
     if stage in ("all", "render"):
         if result.judgment is None:
             result.judgment = _read_judgment(archive_dir)
-        mode = _refresh_mode(cfg, archive_dir, result.judgment, materials_dir)
+        mode = _refresh_mode(
+            cfg, archive_dir, result.judgment, materials_dir, force=force and stage == "render"
+        )
         if mode == "judge":
             # 档案改过或素材还在：整份重算，让数字和话重新同源
             result.judgment = _judge(cfg, materials_dir, profile, run_date, provider)
@@ -80,13 +83,9 @@ def run(
             )
             _write_judgment(result.judgment, archive_dir)
         ctx = RenderContext(
-            date=run_date,
-            archive_dir=archive_dir,
-            profile=profile,
-            material_count=len(collected.files),
-            profile_created=profile.created,
+            out_dir=archive_dir,
             echo=echo,
-            facts=result.judgment.facts,
+            recent_said=recent_said(archive_dir),
         )
         result.renders = _render(cfg, result.judgment, ctx)
 
@@ -157,7 +156,7 @@ def _build_provider(cfg: Config, name: str):
 
 
 def _refresh_mode(
-    cfg: Config, archive_dir: Path, judgment: Judgment, materials_dir: Path
+    cfg: Config, archive_dir: Path, judgment: Judgment, materials_dir: Path, *, force: bool = False
 ) -> str | None:
     """要不要在渲染前重算，以及重算到什么程度。
 
@@ -165,7 +164,7 @@ def _refresh_mode(
     - `facts`：只补事实（旧归档且素材已清理，保住当初的话）
     - `None`：不用动
     """
-    if judgment.facts is None:
+    if judgment.facts is None or force:
         return "judge" if material_files(materials_dir) else "facts"
     verdict = archive_dir / "judgment.json"
     try:
@@ -184,14 +183,14 @@ def _render(cfg: Config, judgment: Judgment, ctx: RenderContext) -> list[RenderR
             "pet": lambda: PetChannel(cfg.pet_base_url, cfg.pet_id, cfg.pet_anim_tiers),
         }.get(name)
         if channel is None:
-            _log(ctx.archive_dir, f"未知渠道，已跳过：{name}")
+            _log(ctx.out_dir, f"未知渠道，已跳过：{name}")
             continue
         try:
             renders.append(channel().render(judgment, ctx))
         except Exception as exc:  # 一个渠道挂了不拖垮整条管线
-            _log(ctx.archive_dir, f"{name} 渲染失败：{exc}")
+            _log(ctx.out_dir, f"{name} 渲染失败：{exc}")
 
-    if not (ctx.archive_dir / "report.md").is_file():
+    if not (ctx.out_dir / "report.md").is_file():
         renders.append(_fallback_render(judgment, ctx))
     return renders
 
@@ -203,9 +202,10 @@ def _log(archive_dir: Path, message: str) -> None:
 
 
 def _fallback_render(judgment: Judgment, ctx: RenderContext) -> RenderResult:
-    ctx.archive_dir.mkdir(parents=True, exist_ok=True)
-    text = f"# {ctx.date}\n\n最近怎么样：{judgment.summary}\n\n下一步怎么走：{judgment.advice}\n"
-    path = ctx.archive_dir / "report.md"
+    ctx.out_dir.mkdir(parents=True, exist_ok=True)
+    day = judgment.facts.date if judgment.facts is not None else ""
+    text = f"# {day}\n\n最近怎么样：{judgment.summary}\n\n下一步怎么走：{judgment.advice}\n"
+    path = ctx.out_dir / "report.md"
     path.write_text(text, encoding="utf-8")
     return RenderResult(channel="fallback", output=text, artifacts=[path])
 
@@ -225,6 +225,30 @@ def _read_judgment(archive_dir: Path) -> Judgment:
     return Judgment.from_dict(json.loads(path.read_text(encoding="utf-8")))
 
 
+def rebuild(*, root: Path | str | None = None, provider: str | None = None, echo: bool = False) -> list[PipelineResult]:
+    """全量重算：逐天重跑判断层与渲染层。
+
+    显式操作，会为每个有素材的日子调用一次模型；素材已清理的日子只补事实，
+    不会用模板话覆盖当初写的内容。
+    """
+    cfg = Config.load(root)
+    results: list[PipelineResult] = []
+    for day_dir in sorted(cfg.archive_dir.iterdir()):
+        if not day_dir.is_dir() or not (day_dir / "judgment.json").is_file():
+            continue
+        results.append(
+            run(
+                date=day_dir.name,
+                stage="render",
+                provider=provider,
+                echo=echo,
+                config=cfg,
+                force=True,
+            )
+        )
+    return results
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="step-ledger", description="把今天的收支素材变成一句有温度的复盘")
     parser.add_argument("--date", help="指定日期（YYYY-MM-DD），默认今天")
@@ -235,9 +259,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", help="项目根目录，默认当前目录或 STEP_LEDGER_ROOT")
     parser.add_argument("--stage", choices=("all", "collect", "judge", "render"), default="all")
     parser.add_argument("--provider", help="临时覆盖 JUDGE_PROVIDER（stub / openai）")
+    parser.add_argument("--rebuild", action="store_true", help="全量重算所有归档日（每天一次模型调用）")
     parser.add_argument("--json", action="store_true", help="以 JSON 输出运行结果")
     parser.add_argument("--no-echo", action="store_true", help="不往终端打印渲染结果")
     args = parser.parse_args(argv)
+
+    if args.rebuild:
+        results = rebuild(root=args.root, provider=args.provider, echo=not args.no_echo)
+        print(f"重算：共 {len(results)} 天")
+        return 0
 
     payload: str | Path | None = args.file or args.text
     if args.stdin:

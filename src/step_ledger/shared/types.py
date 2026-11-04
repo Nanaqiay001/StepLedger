@@ -6,9 +6,6 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .profile import Profile
-
-
 @dataclass
 class CollectResult:
     """采集层的产物：当天素材目录，以及这次新增/跳过的文件。"""
@@ -21,15 +18,14 @@ class CollectResult:
 
 @dataclass
 class RenderContext:
-    """渲染层需要的上下文：日期、归档目录、档案快照。"""
+    """渲染层能拿到的一切：一个只用于写的目录，加上渠道自己的呈现记忆。
 
-    date: str
-    archive_dir: Path
-    profile: Profile
-    material_count: int = 0
-    profile_created: bool = False
+    没有 archive 根路径，也没有档案——日期与数字都在 `Judgment` 里。
+    """
+
+    out_dir: Path
     echo: bool = True
-    facts: Facts | None = None
+    recent_said: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -184,6 +180,7 @@ class DayPoint:
     """趋势图上的一天。quota / over 只在同一个月的日子里给。"""
 
     day: str
+    balance: int | None = None
     spent: int | None = None
     quota: int | None = None
     over: bool = False
@@ -225,6 +222,7 @@ class TrendSummary:
         days = [
             DayPoint(
                 day=_as_str(item.get("day")) or "",
+                balance=_as_int(item.get("balance")),
                 spent=_as_int(item.get("spent")),
                 quota=_as_int(item.get("quota")),
                 over=bool(item.get("over")),

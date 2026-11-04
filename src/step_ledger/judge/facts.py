@@ -115,6 +115,7 @@ def summarize_trend(
         points.append(
             DayPoint(
                 day=current,
+                balance=balances.get(current),
                 spent=daily,
                 quota=day_quota,
                 over=bool(day_quota is not None and daily is not None and daily > day_quota),
@@ -127,7 +128,8 @@ def summarize_trend(
         for point in points
         if (end - timedelta(days=13)).isoformat() <= point.day <= (end - timedelta(days=7)).isoformat()
     ]
-    progress = history.progress_in(start_text, (end - timedelta(days=1)).isoformat())
+    # 里程碑要看得比趋势图更远：取全部历史，展示层自己截断
+    progress = history.progress_in("0000-01-01", (end - timedelta(days=1)).isoformat())
     if facts.goal.savings is not None or facts.goal.percent is not None:
         progress.append(ProgressPoint(day=day, savings=facts.goal.savings, percent=facts.goal.percent))
 

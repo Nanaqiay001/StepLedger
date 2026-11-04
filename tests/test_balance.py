@@ -43,7 +43,7 @@ def test_empty_profile_uses_observed_balance(cfg: Config, monkeypatch) -> None:
 
     report = (cfg.archive_for(DATE) / "report.md").read_text(encoding="utf-8")
     assert "¥12,864" in report
-    assert "AI 从素材识别" in report
+    assert "按素材余额估算" in report
 
     data = json.loads((cfg.archive_for(DATE) / "judgment.json").read_text(encoding="utf-8"))
     assert data["facts"]["goal"]["savings"] == 12864
@@ -61,7 +61,7 @@ def test_profile_savings_win_over_observation(cfg: Config, monkeypatch) -> None:
 
     report = (cfg.archive_for(DATE) / "report.md").read_text(encoding="utf-8")
     assert "¥200,000" in report
-    assert "AI 从素材识别" not in report
+    assert "按素材余额估算" not in report
 
     data = json.loads((cfg.archive_for(DATE) / "judgment.json").read_text(encoding="utf-8"))
     assert data["facts"]["goal"]["savings_source"] == "profile"

@@ -71,7 +71,8 @@ def run(
     else:
         try:
             observation = verify(provider.observe(text, date), text, date)
-            runtime["steps"]["observe"] = "ok"
+            # 「跑通了但没读到数」和「失败了」不是一回事，分开记
+            runtime["steps"]["observe"] = "ok" if observation.balance.value is not None else "empty"
         except Exception as exc:  # 观察挂了不拖垮说话：事实退回历史余额
             observation = Observation()
             runtime["steps"]["observe"] = "failed"
