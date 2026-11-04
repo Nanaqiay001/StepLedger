@@ -19,7 +19,7 @@ sequenceDiagram
     deactivate C
     activate J
     M->>J: 读取素材
-    J->>R: Judgment<br/>花销总结 + 理财建议
+    J->>R: Judgment<br/>事实快照 + 花销总结 + 理财建议
     deactivate J
     activate R
     R->>R: 可视化 + 归档 → RenderResult
@@ -27,7 +27,10 @@ sequenceDiagram
     deactivate R
 ```
 
-管线：采集只负责收，判断只负责说，渲染只负责给人看。层间以文件为界——采集层的产物是素材文件夹，判断层的输入就是它。
+管线：**采集只负责收，判断负责算与说，渲染只负责给人看**。层间以文件为界——采集层的产物是素材文件夹，判断层的输入就是它。
+
+判断层是唯一读 `archive/` 的层：它先观察余额、再算事实、再翻旧账（趋势）、最后说话，
+产出的 `Judgment` 里已经带着算好的数字。渲染层拿不到 archive 根路径，也就不可能自己再算一遍。
 
 设计取向是**定性，不定量**：架构里不放精确对账、预算阈值、分类报表。判断层允许模糊、允许主观，唯一硬要求是"有温度、说人话、仅供参考"。
 
@@ -72,20 +75,25 @@ src/step_ledger/
 | 层 | 职责 | 输入 | 输出 |
 |----|------|------|------|
 | `collect` | 把各方素材收拢成文件 | 外部源 / 手动输入 | 素材文件夹 `materials/YYYY-MM-DD/` |
-| `judge` | 读素材，产出定性总结与建议 | 素材文件夹 | `Judgment`（花销总结 + 理财建议） |
-| `render` | 把 `Judgment` 可视化并归档 | `Judgment` | 渲染产物（文本/图片/网页）+ 归档路径 |
+| `judge` | 观察余额、算事实与趋势、写总结与建议 | 素材文件夹 + 档案 + `archive/`（≤ 当天） | `Judgment`（`facts` + `trend` + 两句话） |
+| `render` | 把 `Judgment` 排版并归档 | `Judgment` + 写目录 | 渲染产物（文本/图片/网页）+ 归档路径 |
 | `pipeline` | 顺序编排各层 | 配置 | `PipelineResult` |
 
 ### 层间契约
 
 - **collect → judge**：文件系统。素材目录存在且至少有一个可读文件
-- **judge → render**：`Judgment` 数据类型，`summary` 与 `advice` 均非空
+- **judge → render**：`Judgment` 数据类型。`facts` 由代码写、模型不可改；`summary` / `advice` 均非空
+- **judge → judge**：只读 `≤ 当天` 的 `archive/`，且余额序列排除当天自身（当天的余额只来自观察）
 - **render → 用户**：产物落盘到 `archive/YYYY-MM-DD/`，或直接输出到终端
+
+判断层内部还有一条契约：`observe()` 只读数、`speak()` 只写字，算术只在 `judge/facts.py` 里发生。
+观测的可信度靠「摘录必须能在素材原文里找到」做机械核验，不靠模型自我评价。
 
 ### 扩展点
 
 - **素材来源**：继承 `BaseAdapter`，实现 `collect() -> Path`（返回当天素材目录）
-- **AI Provider**：继承 `BaseProvider`，实现 `judge(materials_dir: Path) -> Judgment`
+- **AI Provider**：继承 `BaseProvider`，实现 `observe(materials_text, date) -> Observation`
+  与 `speak(materials_dir, profile, date, facts, trend) -> Judgment`
 - **渲染渠道**：继承 `BaseChannel`，实现 `render(judgment: Judgment) -> Path | str`
 
 ## 当前实现状态
@@ -111,20 +119,22 @@ src/step_ledger/
 - 自动素材夹：`COLLECT_SOURCE_DIRS`（逗号分隔，可指向 iCloud 等被快捷指令写入的目录）；
   `--source` 可临时覆盖。文件归属日期优先取文件名里的 `20261028` / `2026-10-28`，没有才看修改时间；
   同名源文件按原文件名覆盖成当天最新快照（源文件当天追加不会变成多份素材）
-- `judgment.meta.progress` 记录当天 target / savings / percent，`milestones.md` 从历史
-  `judgment.json` 里汇总进度
+- `judgment.json` 里 `facts` 存当天事实（`goal` / `month` / `pace`），`trend` 存近两周趋势与
+  进度历史，`observation` 存模型的原始观测（含原文摘录），`runtime` 只存运行信息（provider /
+  usage / steps / degraded_reason）。`meta` 已退役，旧文件读取时自动迁移
 - 真实 provider 只需 `JUDGE_PROVIDER=openai` + `JUDGE_API_KEY`，其余走 `.env` 默认值
-- `judgment.json` 的 `meta.usage` 记录 token 用量
-- 存款来源：`materials/profile.md` 优先；没填时用判断结果里的 `meta.balance`（模型从素材读出，
-  读不到就是 `null`）兜底，`Profile.savings_from_materials` 标记并在报告里注明，不写回档案
-- 空素材日不调模型：0 份素材时直接走 stub 模板并标 `meta.provider = "none"`；空 prompt 只会让模型编
+- `judgment.json` 的 `runtime.usage` 记录 token 用量
+- 存款来源：`materials/profile.md` 优先；没填时用观察步读到的余额兜底，`facts.goal.savings_source`
+  标 `balance` 并在报告里写「按素材余额估算」（卡内余额 ≠ 总存款，所以口径写在脸上）
+- 空素材日不调模型：0 份素材时观察与说话都跳过，`runtime.provider = "none"`、`runtime.steps`
+  记 `skipped` / `stub`；但事实仍由历史余额算出，降级路径也有数字
 - 采集自证：CLI 普通输出打一行 `采集：共 N 份素材；<跳过的原因>`，`--json` 时 stdout 仍只有 JSON
 - 发送前过滤一次性口令：`read_materials` 摘掉含验证码/校验码/动态码的行，素材文件本身不动
-- 当月累计与可花：`render/monthly.py` 用月初前最后余额与当前余额相减算已花；`月收入 − (每月需存 − 公积金月缴存)` 算出本月可花，剩余为负即缺口
-- 每日节奏同样在 `render/monthly.py` 里算：日额度、累计允许、结余/超支、明日额度；模型只负责措辞，不参与计算
-- 趋势产物（渲染层顺手写）：`archive/<日期>/trend.svg` 与 `trend.csv`。数据源是各日
-  `judgment.json` 的 `meta.balance`（卡内余额），按自然日补空、缺口不连成假线；
-  SVG 是 W3C 标准矢量图（零依赖、坐标精确），CSV 供任何表格工具重画
+- 当月累计与可花：`judge/facts.py` 用月初前最后余额与当前余额相减算已花；`月收入 − (每月需存 − 公积金月缴存)` 算出本月可花，剩余为负即缺口。读不到当天余额就退回「上一个有余额的日子」，并标 `spent_as_of`
+- 每日节奏也在 `judge/facts.py` 里算：日额度、累计允许、结余/超支、明日额度；模型只负责措辞，不参与计算
+- 趋势产物：`archive/<日期>/trend.svg` 与 `trend.csv`，数据源是 `judgment.trend.days`（判断层
+  从 `≤ 当天` 的余额序列拼好），按自然日补空、缺口不连成假线；SVG 是 W3C 标准矢量图
+  （零依赖、坐标精确），CSV 供任何表格工具重画
 - `materials/profile.md` 的 `约定：` 分两种：`键 = 值` 进 `Profile.agreements`（代码可用），
   其余原话进 `Profile.notes`；两者都会进 prompt，`目标日期` 还会额外算成「还剩几个月 / 每月要存多少」
 
@@ -145,3 +155,8 @@ src/step_ledger/
 | 层间通信 | 素材文件夹 + 轻量 dataclass | 全程强类型内存对象 | 素材天然异构、来源不固定，落盘更好扩展也能回放 |
 | 解读风格 | 定性 + 有温度 | 精确记账 / 预算管控 | 精确对账成本高、体验冷，用户坚持不下来 |
 | 适配器模式 | 基类继承 | 硬编码 if-else | 素材来源/渲染渠道会持续增加 |
+
+- **重算为准**：`judgment.json` 是缓存。`--stage render` 发现档案比 judgment 新、或旧归档还没有
+  事实快照时会先重算这一天；素材已清理的旧日子只补事实、保留原文并标 `facts_backfilled`
+- **全量重算**：`--rebuild` 逐天重跑所有归档日；改过档案口径想统一历史时用它
+- **两段模型调用**：`observe()` 温度 0 只读数，`speak()` 温度 0.7 只写字；摘录核验由代码做

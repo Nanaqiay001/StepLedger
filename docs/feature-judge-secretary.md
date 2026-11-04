@@ -1,8 +1,8 @@
 # 判断层扩展：把「算」交给秘书的计算器
 
-> 状态：草案 v2，待讨论。对应 issue #13。
+> 状态：**已落地**（2026-11-04，PR1–PR5）。对应 issue #13。
 > 取代此前「独立第四层 facts」的提案（已删除）。
-> 落地后需同步改写 `docs/rfc.md` 的「各层职责」「层间契约」「实现备注」三节。
+> `docs/rfc.md` 的「各层职责」「层间契约」「实现备注」已同步。
 
 ## 决定：不加层
 
@@ -301,7 +301,7 @@ class History:
 | `console._history`、`console._month_line`、`console._pace_line`、`pet._rhythm` | 结论由 `Judgment` 携带，渠道只排版 |
 | `Judgment.meta` | 拆成 `facts` / `trend` / `runtime` |
 
-## 落地顺序
+## 落地顺序（已全部落地）
 
 | PR | 内容 | 验收 |
 |---|---|---|

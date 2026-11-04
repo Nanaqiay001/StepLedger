@@ -3,6 +3,14 @@
 ## Changelog
 
 ### 2026-11-04
+- **渲染层只排版**：删除 `render/monthly.py`（144 行），已花/可花/日额度/明日额度全部来自
+  `judgment.facts`；`render/trend.py` 改吃 `judgment.trend.days`，不再扫 `archive/`；
+  `RenderContext` 从 6 个字段收到 3 个（`out_dir` / `echo` / `recent_said`），
+  渠道拿不到 archive 根路径。加一条结构守卫测试：`render/` 不许 import 历史读取或算术语
+- **`--rebuild`**：逐天重跑所有归档日；素材已清理的日子只补事实、保留原文
+- **观察与说话分开**：`observe()` 温度 0 只读数，`speak()` 温度 0.7 只写字；
+  模型输出契约收窄为 `{summary, advice}`，`parse_balance` 删除
+- 测试 155 项全过（`test_monthly.py` 并入 `test_facts.py`；趋势用例改为吃 `DayPoint`）
 - **判断层接线：秘书上岗**。新增 `judge/secretary.py`，判断层内部变成
   `观察（LLM）→ 计算（代码）→ 统计趋势（代码）→ 说话（LLM）`。`Judgment` 换成
   `facts / trend / observation / runtime`，`meta` 退役（旧归档读取时自动迁移到 runtime）。
@@ -228,6 +236,14 @@
   不需要更精确的因果；用一个日期比较就够，不引额外状态。
 - **D7 `--stage render` 触发重算分两档**（21:41）。素材还在 → 整份重算（话也重写）；
   素材没了 → 只补事实。判据是 `material_files(materials_dir)` 是否为空，不猜。
+- **D9 事实值不可变，视图另起**（22:05）。`Facts` 全 `frozen=True`，渠道要改展示口径只能换措辞，
+  不能改数；测试里改字段用 `dataclasses.replace`，避免悄悄改坏共享对象。
+- **D10 趋势点带上余额**（22:10）。图表画的是卡内余额，不是当日花销，所以在 `DayPoint` 上加
+  `balance`，让 `render/trend.py` 不用再自己拼序列。一张图的数据只来自 `judgment.trend`。
+- **D11 里程碑看全量进度，趋势只看两周**（22:15）。原实现靠扫 archive 取最近 14 条，跨月稀疏时
+  会断档；改为 `progress_in` 取全部历史，展示层截断 14 条。曲线仍然只画两周，因为长曲线没有信息量。
+- **D12 `steps` 区分 empty 与 failed**（22:20）。stub 的观察不报错但读不到数，记 `empty`；
+  只有异常才记 `failed`。这样 `degraded` 不会被「离线跑」误触发，排查时也能一眼看出差别。
 - **D8 `Judgment` 挪到 `types.py` 末尾**（21:30）。它现在引用 `Facts` / `TrendSummary`，
   Python 是运行时求值默认参数，前置定义会 NameError；挪到文件末尾比加字符串注解更直接。
 
