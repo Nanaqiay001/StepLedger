@@ -24,21 +24,28 @@ class Point:
     value: int | None
 
 
+def balances(archive_root: Path) -> dict[str, int]:
+    """归档里每天的卡内余额快照（没有余额的日子不出现）。"""
+    found: dict[str, int] = {}
+    if not archive_root.is_dir():
+        return found
+    for day_dir in sorted(archive_root.iterdir()):
+        path = day_dir / "judgment.json"
+        if not path.is_file():
+            continue
+        try:
+            meta = json.loads(path.read_text(encoding="utf-8")).get("meta") or {}
+        except (OSError, json.JSONDecodeError):
+            continue
+        balance = meta.get("balance")
+        if isinstance(balance, (int, float)) and not isinstance(balance, bool):
+            found[day_dir.name] = int(balance)
+    return found
+
+
 def series(archive_root: Path, days: int = WINDOW_DAYS) -> list[Point]:
     """读归档里的余额快照，按自然日补空（没跑管线的日子是断点，不是 0）。"""
-    found: dict[str, int] = {}
-    if archive_root.is_dir():
-        for day_dir in sorted(archive_root.iterdir()):
-            path = day_dir / "judgment.json"
-            if not path.is_file():
-                continue
-            try:
-                meta = json.loads(path.read_text(encoding="utf-8")).get("meta") or {}
-            except (OSError, json.JSONDecodeError):
-                continue
-            balance = meta.get("balance")
-            if isinstance(balance, (int, float)) and not isinstance(balance, bool):
-                found[day_dir.name] = int(balance)
+    found = balances(archive_root)
     if not found:
         return []
 

@@ -89,3 +89,27 @@ def test_report_shows_goal_deadline(tmp_path: Path) -> None:
     assert "目标日期：2030-12" in report
     assert "还剩 50 个月" in report
     assert "每月要存 ¥16,000" in report
+
+
+def test_report_shows_month_to_date(tmp_path: Path) -> None:
+    """报告要给当月累计：月初基线 → 今天的余额差。"""
+    archive = tmp_path / "archive"
+    for day, balance in {"2026-10-31": 12000, "2026-11-02": 11700}.items():
+        target = archive / day
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "judgment.json").write_text(
+            json.dumps({"summary": "s", "advice": "a", "meta": {"date": day, "balance": balance}}),
+            encoding="utf-8",
+        )
+    profile = parse_profile("- 目标：100 万\n- 当前存款：20 万\n", tmp_path / "profile.md")
+    ctx = RenderContext(
+        date="2026-11-02",
+        archive_dir=archive / "2026-11-02",
+        profile=profile,
+        echo=False,
+    )
+    judgment = Judgment(summary="还行", advice="继续")
+
+    report = ConsoleChannel().render(judgment, ctx).output
+
+    assert "本月净流出：¥300（10-31→11-02" in report

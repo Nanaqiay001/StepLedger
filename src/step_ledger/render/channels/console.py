@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from ..base import BaseChannel
+from ..monthly import month_spend
 from ..trend import write as write_trend
 from ...shared.profile import Profile, format_money, goal_plan
 from ...shared.types import Judgment, RenderContext, RenderResult
@@ -45,6 +46,9 @@ class ConsoleChannel(BaseChannel):
             f"- 还差：{'未知' if ctx.profile.distance is None else format_money(ctx.profile.distance)}",
             f"- 进度：{_progress_line(ctx.profile)}",
         ]
+        spending = month_spend(ctx.archive_dir.parent, ctx.date, ctx.profile)
+        if spending is not None:
+            lines.append(self._month_line(spending))
         plan = goal_plan(ctx.profile, ctx.date)
         if plan is not None:
             lines.append(
@@ -57,6 +61,17 @@ class ConsoleChannel(BaseChannel):
             lines += ["", "> 降级模式：AI 暂时不可用，这条是用本地模板说的，仅供参考。"]
         lines += ["", "_仅供参考，不构成投资建议。_"]
         return "\n".join(lines) + "\n"
+
+    @staticmethod
+    def _month_line(spending) -> str:  # noqa: ANN001 - 只在这个文件内部用
+        basis = f"{spending.since[5:]} 起算" if spending.partial else f"{spending.since[5:]}→{spending.until[5:]}"
+        line = f"- 本月净流出：{format_money(spending.net_out)}（{basis}，含自动转存）"
+        if spending.budget is not None:
+            line = (
+                f"- 本月净流出：{format_money(spending.net_out)} / 目标 "
+                f"{format_money(spending.budget)}（还剩 {format_money(spending.remaining)}）"
+            )
+        return line
 
     def _milestones(self, ctx: RenderContext) -> str:
         entries = _history(ctx.archive_dir.parent)
