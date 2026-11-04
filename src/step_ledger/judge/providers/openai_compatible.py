@@ -60,7 +60,7 @@ class OpenAICompatibleProvider(BaseProvider):
             summary=summary,
             advice=advice,
             prompt=prompt,
-            meta={
+            runtime={
                 "provider": self.name,
                 "model": self.model,
                 "material_count": len(files),

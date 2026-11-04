@@ -10,40 +10,6 @@ from .profile import Profile
 
 
 @dataclass
-class Judgment:
-    """判断层的产物：一句有温度的花销总结 + 一条可执行的理财建议。"""
-
-    summary: str
-    advice: str
-    prompt: str = ""
-    degraded: bool = False
-    meta: dict[str, Any] = field(default_factory=dict)
-
-    @property
-    def is_valid(self) -> bool:
-        return bool(self.summary.strip()) and bool(self.advice.strip())
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "summary": self.summary,
-            "advice": self.advice,
-            "prompt": self.prompt,
-            "degraded": self.degraded,
-            "meta": self.meta,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Judgment":
-        return cls(
-            summary=str(data.get("summary", "")),
-            advice=str(data.get("advice", "")),
-            prompt=str(data.get("prompt", "")),
-            degraded=bool(data.get("degraded", False)),
-            meta=dict(data.get("meta") or {}),
-        )
-
-
-@dataclass
 class CollectResult:
     """采集层的产物：当天素材目录，以及这次新增/跳过的文件。"""
 
@@ -63,6 +29,7 @@ class RenderContext:
     material_count: int = 0
     profile_created: bool = False
     echo: bool = True
+    facts: Facts | None = None
 
 
 @dataclass
@@ -388,3 +355,67 @@ def _as_str(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+@dataclass
+class Judgment:
+    """判断层的产物：一个事实快照 + 两句话。
+
+    事实（`facts` / `trend`）由代码算，模型不能改；话（`summary` / `advice`）由模型写。
+    `runtime` 只放「这次运行发生了什么」，不放任何会被渲染层当事实用的数字。
+    """
+
+    summary: str
+    advice: str
+    facts: Facts | None = None
+    trend: TrendSummary = field(default_factory=TrendSummary)
+    observation: Observation = field(default_factory=Observation)
+    prompt: str = ""
+    degraded: bool = False
+    runtime: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def is_valid(self) -> bool:
+        return bool(self.summary.strip()) and bool(self.advice.strip())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "summary": self.summary,
+            "advice": self.advice,
+            "prompt": self.prompt,
+            "degraded": self.degraded,
+            "facts": None if self.facts is None else facts_to_dict(self.facts),
+            "trend": self.trend.to_dict(),
+            "observation": self.observation.to_dict(),
+            "runtime": self.runtime,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Judgment":
+        runtime = dict(data.get("runtime") or {})
+        if not runtime:
+            # 旧归档把运行信息放在 meta 里，迁到 runtime，别丢 degraded_reason
+            meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+            runtime = {
+                key: meta[key]
+                for key in (
+                    "provider",
+                    "model",
+                    "usage",
+                    "material_count",
+                    "skipped",
+                    "degraded_reason",
+                    "requested_provider",
+                )
+                if key in meta
+            }
+        return cls(
+            summary=str(data.get("summary", "")),
+            advice=str(data.get("advice", "")),
+            prompt=str(data.get("prompt", "")),
+            degraded=bool(data.get("degraded", False)),
+            facts=facts_from_dict(data.get("facts")),
+            trend=TrendSummary.from_dict(data.get("trend")),
+            observation=Observation.from_dict(data.get("observation")),
+            runtime=runtime,
+        )

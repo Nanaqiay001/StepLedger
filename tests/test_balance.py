@@ -11,7 +11,7 @@ from conftest import DATE
 from step_ledger.judge.prompt import parse_balance, parse_judgment_response
 from step_ledger.pipeline import run
 from step_ledger.shared.config import Config
-from step_ledger.shared.types import Judgment
+from step_ledger.shared.types import BalanceObs, Judgment, Observation
 
 
 class FakeProvider:
@@ -20,12 +20,17 @@ class FakeProvider:
     def __init__(self, balance: int | None) -> None:
         self.balance = balance
 
+    def observe(self, materials_text: str, date: str = "") -> Observation:
+        return Observation(
+            balance=BalanceObs(value=self.balance, as_of=date, excerpt="余额", confidence="ok")
+        )
+
     def judge(self, materials_dir: Path, profile, date: str = "") -> Judgment:
         return Judgment(
             summary="今天挺稳",
             advice="明天继续记一笔",
             prompt="fake prompt",
-            meta={"provider": "fake", "balance": self.balance},
+            runtime={"provider": "fake"},
         )
 
 
@@ -54,14 +59,15 @@ def test_empty_profile_uses_model_balance(cfg: Config, monkeypatch) -> None:
 
     monkeypatch.setattr(pipeline, "_build_provider", lambda cfg, name: FakeProvider(12864))
 
-    run(date=DATE, payload="咖啡 20", provider="openai", config=cfg, echo=False)
+    run(date=DATE, payload="咖啡 20，余额 12864", provider="openai", config=cfg, echo=False)
 
     report = (cfg.archive_for(DATE) / "report.md").read_text(encoding="utf-8")
     assert "¥12,864" in report
     assert "AI 从素材识别" in report
 
     data = json.loads((cfg.archive_for(DATE) / "judgment.json").read_text(encoding="utf-8"))
-    assert data["meta"]["progress"]["savings"] == 12864
+    assert data["facts"]["goal"]["savings"] == 12864
+    assert data["facts"]["goal"]["savings_source"] == "balance"
 
 
 def test_profile_savings_win_over_model(cfg: Config, monkeypatch) -> None:
@@ -71,7 +77,7 @@ def test_profile_savings_win_over_model(cfg: Config, monkeypatch) -> None:
     cfg.profile_path.parent.mkdir(parents=True, exist_ok=True)
     cfg.profile_path.write_text("- 目标：100 万\n- 当前存款：200000\n", encoding="utf-8")
 
-    run(date=DATE, payload="咖啡 20", provider="openai", config=cfg, echo=False)
+    run(date=DATE, payload="咖啡 20，余额 12864", provider="openai", config=cfg, echo=False)
 
     report = (cfg.archive_for(DATE) / "report.md").read_text(encoding="utf-8")
     assert "¥200,000" in report

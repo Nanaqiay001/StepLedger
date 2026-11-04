@@ -1,6 +1,12 @@
 """管线编排：采集 → 判断 → 渲染。两个入口（agent / cron）都走这里。
 
 每一层都可以单独重跑（`--stage`），同日重复执行覆盖当天产物，不新建日期目录。
+
+判断层负责算事实：`secretary.run()` 会先观察余额、再算已花与额度、最后让模型说话。
+所以渲染层拿到的 `Judgment` 里已经带着数字，不需要再去翻 `archive/`。
+
+重算为准：`judgment.json` 是缓存。`--stage render` 发现档案比判断结果新、
+或旧归档还没有事实快照时，会先把这一天重算一遍再排版。
 """
 
 from __future__ import annotations
@@ -8,27 +14,21 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import replace
 from datetime import date as date_type
 from pathlib import Path
 
 from .collect.adapters.folder import FolderAdapter
 from .collect.adapters.manual import ManualAdapter, material_files
 from .judge.base import ProviderError
-from .judge.prompt import build_prompt, read_materials
+from .judge import secretary
+from .judge.history import History
 from .judge.providers.openai_compatible import OpenAICompatibleProvider
 from .judge.providers.stub import StubProvider
 from .render.channels.console import ConsoleChannel
 from .render.channels.pet import PetChannel
 from .shared.config import Config
 from .shared.profile import Profile, ensure_profile, load_profile
-from .shared.types import (
-    CollectResult,
-    Judgment,
-    PipelineResult,
-    RenderContext,
-    RenderResult,
-)
+from .shared.types import CollectResult, Judgment, PipelineResult, RenderContext, RenderResult
 
 
 def run(
@@ -59,17 +59,25 @@ def run(
 
     if stage in ("all", "judge"):
         result.judgment = _judge(cfg, materials_dir, profile, run_date, provider)
-        result.skipped.extend(result.judgment.meta.get("skipped") or [])
-        profile = _with_judged_savings(profile, result.judgment)
+        result.skipped.extend(result.judgment.runtime.get("skipped") or [])
         _write_judgment(result.judgment, archive_dir)
 
     if stage in ("all", "render"):
         if result.judgment is None:
             result.judgment = _read_judgment(archive_dir)
-            profile = _with_judged_savings(profile, result.judgment)
-        # 档案可能刚改过：重跑渲染时也要刷新当天的进度快照
-        _stamp_progress(result.judgment, profile, run_date)
-        if stage == "render":
+        mode = _refresh_mode(cfg, archive_dir, result.judgment, materials_dir)
+        if mode == "judge":
+            # 档案改过或素材还在：整份重算，让数字和话重新同源
+            result.judgment = _judge(cfg, materials_dir, profile, run_date, provider)
+            _write_judgment(result.judgment, archive_dir)
+        elif mode == "facts":
+            # 旧归档补事实：素材已经没了，别用模板话覆盖当初模型写的
+            result.judgment = secretary.backfill(
+                judgment=result.judgment,
+                profile=profile,
+                date=run_date,
+                history=History(cfg.archive_dir, day=run_date),
+            )
             _write_judgment(result.judgment, archive_dir)
         ctx = RenderContext(
             date=run_date,
@@ -78,6 +86,7 @@ def run(
             material_count=len(collected.files),
             profile_created=profile.created,
             echo=echo,
+            facts=result.judgment.facts,
         )
         result.renders = _render(cfg, result.judgment, ctx)
 
@@ -88,16 +97,6 @@ def _load_or_create_profile(path: Path, *, create: bool) -> Profile:
     if create:
         return ensure_profile(path)
     return load_profile(path)
-
-
-def _with_judged_savings(profile: Profile, judgment: Judgment) -> Profile:
-    """档案没填存款时，用模型从素材里读到的余额兜底；手填的永远优先。"""
-    if profile.savings is not None:
-        return profile
-    balance = judgment.meta.get("balance")
-    if not isinstance(balance, (int, float)) or isinstance(balance, bool):
-        return profile
-    return replace(profile, savings=int(balance), savings_from_materials=True)
 
 
 def _collect(
@@ -118,42 +117,35 @@ def _collect(
     return merged
 
 
-def _judge(cfg: Config, materials_dir: Path, profile: Profile, run_date: str, override: str | None) -> Judgment:
+def _judge(
+    cfg: Config,
+    materials_dir: Path,
+    profile: Profile,
+    run_date: str,
+    override: str | None,
+) -> Judgment:
     requested = (override or cfg.provider or "stub").strip().lower()
-    if not material_files(materials_dir):
-        # 没素材就不问模型：空料只会让它编，模板把"今天没记录"说得更实在
-        judgment = StubProvider().judge(materials_dir, profile, run_date)
-        judgment.meta["provider"] = "none"
-        judgment.meta["requested_provider"] = requested
-        _stamp_progress(judgment, _with_judged_savings(profile, judgment), run_date)
-        return judgment
-    try:
-        provider = _build_provider(cfg, requested)
-        judgment = provider.judge(materials_dir, profile, run_date)
-        if not judgment.is_valid:
-            raise ProviderError("判断结果为空")
-    except Exception as exc:  # 模型不可用 → 用模板兜底，但必须标注降级
-        judgment = StubProvider().judge(materials_dir, profile, run_date)
-        judgment.degraded = True
-        judgment.meta["degraded_reason"] = str(exc)
-        judgment.meta["requested_provider"] = requested
+    provider_error = None
+    if material_files(materials_dir):
+        try:
+            provider = _build_provider(cfg, requested)
+        except Exception as exc:  # 没配 key / 未知 provider：降级但仍算出事实
+            provider = StubProvider()
+            provider_error = f"模型不可用：{exc}"
+    else:
+        provider = StubProvider()
 
-    if not judgment.prompt:
-        text, _ = read_materials(materials_dir)
-        judgment.prompt = build_prompt(profile, text, run_date, len(material_files(materials_dir)))
-
-    _stamp_progress(judgment, _with_judged_savings(profile, judgment), run_date)
-    return judgment
-
-
-def _stamp_progress(judgment: Judgment, profile: Profile, run_date: str) -> None:
-    judgment.meta["date"] = run_date
-    judgment.meta["progress"] = {
-        "target": profile.target,
-        "savings": profile.savings,
-        "distance": profile.distance,
-        "percent": profile.percent,
-    }
+    return secretary.run(
+        materials_dir=materials_dir,
+        profile=profile,
+        date=run_date,
+        provider=provider,
+        history=History(cfg.archive_dir, day=run_date),
+        requested=requested,
+        profile_created=profile.created,
+        backfilled=run_date < date_type.today().isoformat(),
+        provider_error=provider_error,
+    )
 
 
 def _build_provider(cfg: Config, name: str):
@@ -162,6 +154,26 @@ def _build_provider(cfg: Config, name: str):
     if name in ("openai", "openai_compatible", "compatible"):
         return OpenAICompatibleProvider(cfg.api_key, cfg.model, cfg.base_url)
     raise ProviderError(f"未知的 JUDGE_PROVIDER：{name}")
+
+
+def _refresh_mode(
+    cfg: Config, archive_dir: Path, judgment: Judgment, materials_dir: Path
+) -> str | None:
+    """要不要在渲染前重算，以及重算到什么程度。
+
+    - `judge`：整份重算（档案改过，或旧归档但素材还在）
+    - `facts`：只补事实（旧归档且素材已清理，保住当初的话）
+    - `None`：不用动
+    """
+    if judgment.facts is None:
+        return "judge" if material_files(materials_dir) else "facts"
+    verdict = archive_dir / "judgment.json"
+    try:
+        if cfg.profile_path.stat().st_mtime_ns > verdict.stat().st_mtime_ns:
+            return "judge"
+    except OSError:
+        return None
+    return None
 
 
 def _render(cfg: Config, judgment: Judgment, ctx: RenderContext) -> list[RenderResult]:

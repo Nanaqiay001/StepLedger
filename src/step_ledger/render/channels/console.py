@@ -8,7 +8,7 @@ from pathlib import Path
 from ..base import BaseChannel
 from ..monthly import day_spend, month_spend, pace, spend_plan
 from ..trend import write as write_trend
-from ...shared.profile import Profile, format_money, goal_plan
+from ...shared.profile import format_money, goal_plan
 from ...shared.types import Judgment, RenderContext, RenderResult
 
 BAR_CELLS = 10
@@ -35,16 +35,17 @@ class ConsoleChannel(BaseChannel):
         return RenderResult(channel=self.name, output=report, artifacts=artifacts)
 
     def _report(self, judgment: Judgment, ctx: RenderContext) -> str:
+        target, savings, distance, percent, from_materials = _goal_view(ctx)
         lines = [
             f"# {ctx.date} · 跬步账",
             f"最近怎么样：{judgment.summary}",
             f"下一步怎么走：{judgment.advice}",
             "",
             "## 离目标还有多远",
-            f"- 目标：{format_money(ctx.profile.target)}",
-            f"- 当前存款：{_savings_text(ctx.profile)}",
-            f"- 还差：{'未知' if ctx.profile.distance is None else format_money(ctx.profile.distance)}",
-            f"- 进度：{_progress_line(ctx.profile)}",
+            f"- 目标：{format_money(target)}",
+            f"- 当前存款：{_savings_text(savings, from_materials)}",
+            f"- 还差：{'未知' if distance is None else format_money(distance)}",
+            f"- 进度：{_progress_line(percent)}",
         ]
         spending = month_spend(ctx.archive_dir.parent, ctx.date)
         budget = spend_plan(ctx.profile, ctx.date, spending.net_out) if spending is not None else None
@@ -53,11 +54,11 @@ class ConsoleChannel(BaseChannel):
         if budget is not None:
             today_out = day_spend(ctx.archive_dir.parent, ctx.date)
             lines.append(self._pace_line(pace(budget, ctx.date, today_out)))
-        plan = goal_plan(ctx.profile, ctx.date)
-        if plan is not None:
+        deadline, months, per_month = _plan_view(ctx)
+        if deadline is not None and months is not None and per_month is not None:
             lines.append(
-                f"- 目标日期：{plan.deadline}（还剩 {plan.months} 个月，"
-                f"每月要存 {format_money(plan.per_month)}，不计收益）"
+                f"- 目标日期：{deadline}（还剩 {months} 个月，"
+                f"每月要存 {format_money(per_month)}，不计收益）"
             )
         if ctx.profile_created:
             lines += ["", "> 第一次见：把你的目标和存款写进 `materials/profile.md`，我下次就记住了。"]
@@ -101,13 +102,14 @@ class ConsoleChannel(BaseChannel):
 
     def _milestones(self, ctx: RenderContext) -> str:
         entries = _history(ctx.archive_dir.parent)
+        target, savings, distance, percent, from_materials = _goal_view(ctx)
         lines = [
             "# 目标里程碑",
             "",
-            f"- 目标：{format_money(ctx.profile.target)}",
-            f"- 当前存款：{_savings_text(ctx.profile)}",
-            f"- 还差：{'未知' if ctx.profile.distance is None else format_money(ctx.profile.distance)}",
-            f"- 进度：{_progress_line(ctx.profile)}",
+            f"- 目标：{format_money(target)}",
+            f"- 当前存款：{_savings_text(savings, from_materials)}",
+            f"- 还差：{'未知' if distance is None else format_money(distance)}",
+            f"- 进度：{_progress_line(percent)}",
             "",
             "## 最近进度",
             "",
@@ -129,19 +131,50 @@ class ConsoleChannel(BaseChannel):
         return "\n".join(lines) + "\n"
 
 
-def _savings_text(profile: Profile) -> str:
-    text = format_money(profile.savings)
-    if profile.savings is not None and profile.savings_from_materials:
+def _goal_view(ctx: RenderContext) -> tuple[int, int | None, int | None, float | None, bool]:
+    """目标四项：优先读判断层算好的事实，旧路径才退回档案。"""
+    if ctx.facts is not None:
+        goal = ctx.facts.goal
+        return (
+            goal.target,
+            goal.savings,
+            goal.distance,
+            goal.percent,
+            goal.savings_source == "balance",
+        )
+    return (
+        ctx.profile.target,
+        ctx.profile.savings,
+        ctx.profile.distance,
+        ctx.profile.percent,
+        ctx.profile.savings_from_materials,
+    )
+
+
+def _plan_view(ctx: RenderContext) -> tuple[str | None, int | None, int | None]:
+    """目标日期的倒推：事实里有就用事实，旧路径退回档案。"""
+    if ctx.facts is not None:
+        goal = ctx.facts.goal
+        return goal.deadline, goal.months, goal.per_month
+    plan = goal_plan(ctx.profile, ctx.date)
+    if plan is None:
+        return None, None, None
+    return plan.deadline, plan.months, plan.per_month
+
+
+def _savings_text(savings: int | None, from_materials: bool) -> str:
+    text = format_money(savings)
+    if savings is not None and from_materials:
         return f"{text}（AI 从素材识别）"
     return text
 
 
-def _progress_line(profile: Profile) -> str:
-    if profile.percent is None:
+def _progress_line(percent: float | None) -> str:
+    if percent is None:
         return "未填写存款，暂时画不出进度条"
-    filled = int(round(profile.percent * BAR_CELLS))
+    filled = int(round(percent * BAR_CELLS))
     bar = "█" * filled + "░" * (BAR_CELLS - filled)
-    return f"{bar} {profile.percent * 100:.1f}%"
+    return f"{bar} {percent * 100:.1f}%"
 
 
 def _history(archive_dir: Path) -> list[dict]:
@@ -159,14 +192,17 @@ def _history(archive_dir: Path) -> list[dict]:
             data = json.loads(judgment_file.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        progress = (data.get("meta") or {}).get("progress")
-        if not isinstance(progress, dict):
+        facts = data.get("facts") if isinstance(data.get("facts"), dict) else {}
+        goal = facts.get("goal") if isinstance(facts.get("goal"), dict) else {}
+        meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+        progress = meta.get("progress") if isinstance(meta.get("progress"), dict) else {}
+        if not goal and not progress:
             continue
         entries.append(
             {
-                "date": data.get("meta", {}).get("date", day_dir.name),
-                "savings": progress.get("savings"),
-                "percent": progress.get("percent"),
+                "date": facts.get("date") or meta.get("date") or day_dir.name,
+                "savings": goal.get("savings", progress.get("savings")),
+                "percent": goal.get("percent", progress.get("percent")),
             }
         )
     return entries

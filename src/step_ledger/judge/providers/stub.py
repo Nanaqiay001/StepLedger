@@ -31,14 +31,14 @@ class StubProvider(BaseProvider):
         if not text.strip():
             summary = "今天没有记录，空白也是一种信息——至少没有意外的大额。"
             advice = "明天随手记一条就好，哪怕是「午饭 30」这种；有记录，判断才有依据。"
-            meta = {"provider": self.name, "material_count": 0}
+            runtime = {"provider": self.name, "material_count": 0}
         else:
             spend = sum(text.count(hint) for hint in _SPEND_HINTS)
             income = sum(text.count(hint) for hint in _INCOME_HINTS)
             lines = [line.strip() for line in text.splitlines() if line.strip()]
             summary = self._summary(spend, income)
             advice = self._advice(spend, income, profile)
-            meta = {
+            runtime = {
                 "provider": self.name,
                 "material_count": len(files),
                 "line_count": len(lines),
@@ -47,9 +47,9 @@ class StubProvider(BaseProvider):
             }
 
         if profile.distance is not None:
-            meta["distance"] = profile.distance
-        meta["skipped"] = skipped
-        return Judgment(summary=summary, advice=advice, prompt=prompt, meta=meta)
+            runtime["distance"] = profile.distance
+        runtime["skipped"] = skipped
+        return Judgment(summary=summary, advice=advice, prompt=prompt, runtime=runtime)
 
     @staticmethod
     def _summary(spend: int, income: int) -> str:

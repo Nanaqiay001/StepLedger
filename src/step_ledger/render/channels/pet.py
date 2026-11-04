@@ -184,10 +184,17 @@ def build_brief(
     tiers: tuple[str, ...] = DEFAULT_TIERS,
 ) -> str:
     """给宿主 agent 的播报简报：事实 + 可发挥的空间 + 一条能照抄的命令。"""
-    percent = ctx.profile.percent
+    if ctx.facts is not None:
+        percent = ctx.facts.goal.percent
+        savings_value = ctx.facts.goal.savings
+        target_value = ctx.facts.goal.target
+    else:
+        percent = ctx.profile.percent
+        savings_value = ctx.profile.savings
+        target_value = ctx.profile.target
     progress = "未填写存款" if percent is None else f"{percent * 100:.1f}%"
-    savings = format_money(ctx.profile.savings) if ctx.profile.savings is not None else "未填写"
-    target = format_money(ctx.profile.target)
+    savings = format_money(savings_value) if savings_value is not None else "未填写"
+    target = format_money(target_value)
     suggested = pick_animation(percent, tiers) or "（这次不推荐档位，随你挑）"
     style_name, style_hint = style_for(ctx.date)
     said = recent_said(ctx.archive_dir)

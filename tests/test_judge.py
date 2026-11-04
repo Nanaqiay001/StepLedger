@@ -43,7 +43,7 @@ def test_stub_without_materials_is_honest(tmp_path: Path) -> None:
 
     assert "今天没有记录" in judgment.summary
     assert judgment.advice.strip()
-    assert judgment.meta["material_count"] == 0
+    assert judgment.runtime["material_count"] == 0
 
 
 def test_prompt_carries_user_agreements(tmp_path: Path) -> None:
