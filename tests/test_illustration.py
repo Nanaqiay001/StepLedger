@@ -183,6 +183,11 @@ def test_run_writes_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     assert "小票上只有一个数字 81" in prompt_text
     assert "附录" not in prompt_text
 
+    # 同一路径的图会被重跑覆盖，所以另存一份带时间戳的副本供查看
+    stamps = sorted(out.glob("illustration-[0-9][0-9][0-9][0-9].jpg"))
+    assert len(stamps) == 1
+    assert stamps[0].read_bytes() == result.image.read_bytes()
+
 
 def test_run_without_key_skips(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path, with_key=False)
