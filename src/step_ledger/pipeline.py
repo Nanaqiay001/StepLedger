@@ -25,6 +25,7 @@ from .judge import secretary
 from .judge.history import History
 from .judge.providers.openai_compatible import OpenAICompatibleProvider
 from .judge.providers.stub import StubProvider
+from .render import illustration
 from .render.base import BaseChannel
 from .render.channels.console import ConsoleChannel
 from .render.channels.pet import PetChannel, recent_said
@@ -84,31 +85,47 @@ def run(
         result.skipped.extend(result.judgment.runtime.get("skipped") or [])
         _write_judgment(result.judgment, archive_dir)
 
-    if stage in ("all", "render"):
+    if stage in ("all", "illustrate", "render"):
         if result.judgment is None:
-            result.judgment = _read_judgment(archive_dir)
-        mode = _refresh_mode(
-            cfg, archive_dir, result.judgment, materials_dir, force=force and stage == "render"
-        )
-        if mode == "judge":
-            # 档案改过或素材还在：整份重算，让数字和话重新同源
-            result.judgment = _judge(cfg, materials_dir, profile, run_date, provider)
-            _write_judgment(result.judgment, archive_dir)
-        elif mode == "facts":
-            # 旧归档补事实：素材已经没了，别用模板话覆盖当初模型写的
-            result.judgment = secretary.backfill(
-                judgment=result.judgment,
-                profile=profile,
-                date=run_date,
-                history=History(cfg.archive_dir, day=run_date),
+            try:
+                result.judgment = _read_judgment(archive_dir)
+            except FileNotFoundError:
+                if stage != "illustrate":
+                    raise
+                # 单独补图时没有判断就先判一次；有判断就不重复花钱
+                result.judgment = _judge(cfg, materials_dir, profile, run_date, provider)
+                _write_judgment(result.judgment, archive_dir)
+        mode = None
+        if stage != "illustrate":
+            mode = _refresh_mode(
+                cfg, archive_dir, result.judgment, materials_dir, force=force and stage == "render"
             )
-            _write_judgment(result.judgment, archive_dir)
+            if mode == "judge":
+                # 档案改过或素材还在：整份重算，让数字和话重新同源
+                result.judgment = _judge(cfg, materials_dir, profile, run_date, provider)
+                _write_judgment(result.judgment, archive_dir)
+            elif mode == "facts":
+                # 旧归档补事实：素材已经没了，别用模板话覆盖当初模型写的
+                result.judgment = secretary.backfill(
+                    judgment=result.judgment,
+                    profile=profile,
+                    date=run_date,
+                    history=History(cfg.archive_dir, day=run_date),
+                )
+                _write_judgment(result.judgment, archive_dir)
         ctx = RenderContext(
             out_dir=archive_dir,
             echo=echo,
             recent_said=recent_said(archive_dir),
         )
-        result.renders = _render(cfg, result.judgment, ctx)
+        if stage in ("all", "illustrate"):
+            result.illustration = illustration.run(cfg, result.judgment, ctx)
+            ctx.illustration = result.illustration
+        elif stage == "render":
+            # 只读已有插画；这轮重算过就把旧图当过期，不挂到简报里
+            ctx.illustration = illustration.load_existing(archive_dir, stale=bool(mode))
+        if stage in ("all", "render"):
+            result.renders = _render(cfg, result.judgment, ctx)
 
     return result
 
@@ -351,7 +368,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source", action="append", help="额外收一个素材夹（可多次；给了就覆盖 COLLECT_SOURCE_DIRS）")
     parser.add_argument("--stdin", action="store_true", help="从 stdin 读素材")
     parser.add_argument("--root", help="项目根目录，默认当前目录或 STEP_LEDGER_ROOT")
-    parser.add_argument("--stage", choices=("all", "collect", "judge", "render"), default="all")
+    parser.add_argument(
+        "--stage", choices=("all", "collect", "judge", "illustrate", "render"), default="all"
+    )
     parser.add_argument("--provider", help="临时覆盖 JUDGE_PROVIDER（stub / openai）")
     parser.add_argument("--settle", action="store_true", help="清点指定日期（默认昨天）的账，不播报")
     parser.add_argument("--rebuild", action="store_true", help="全量重算所有归档日（每天一次模型调用）")
@@ -396,10 +415,23 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
         return 0
 
+    if args.stage == "illustrate":
+        ill = result.illustration
+        if ill is not None and ill.image is not None:
+            print(f"插画：{ill.image}")
+        else:
+            print(f"插画：跳过（{ill.reason if ill is not None else '未生成'}）")
+        return 0
+
     # 采集这层最容易静默出错：0 份素材也得说出来，别让人对着空气写总结
     summary = f"采集：共 {len(material_files(result.materials_dir))} 份素材"
     if result.skipped:
         summary += "；" + "；".join(result.skipped)
+    if result.illustration is not None:
+        if result.illustration.image is not None:
+            summary += f"；插画：{result.illustration.image.name}"
+        else:
+            summary += f"；插画跳过（{result.illustration.reason}）"
     print(summary)
     return 0
 

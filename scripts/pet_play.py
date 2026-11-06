@@ -7,6 +7,7 @@ dsh-pet：surface 匹配、取锁、投喂、点播、等回执、释放、读�
     python scripts/pet_play.py --list
     python scripts/pet_play.py --text "今天工资到了，先留一小份不动" --anim "余额-数金皱眉"
     python scripts/pet_play.py --text "又超了啊" --meme "要不直接骂他"
+    python scripts/pet_play.py --text "今天多花的那一块钱…" --image archive/2026-11-06/illustration.jpg
     python scripts/pet_play.py --auto            # 无人值守：用当天 judgment.json 压一句
 """
 
@@ -38,6 +39,7 @@ def _parse(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--anim", help="动画名；给 `--list` 里出现过的")
     parser.add_argument("--no-anim", action="store_true", help="不指定动画，用宠物自己的碎碎念动画")
     parser.add_argument("--meme", help="表情包名（可选，见 --list）")
+    parser.add_argument("--image", help="插画文件路径（可选；与 --meme 二选一）")
     parser.add_argument("--duration", type=int, help="气泡停留毫秒数（默认 10000）")
     parser.add_argument("--list", action="store_true", help="列出可点播的动画与表情包")
     parser.add_argument("--auto", action="store_true", help="用当天 judgment.json 自动压一句话（兜底）")
@@ -56,7 +58,7 @@ def _load_judgment(cfg: Config, date: str | None) -> tuple[Judgment | None, floa
         return None, None
     data = json.loads(path.read_text(encoding="utf-8"))
     judgment = Judgment.from_dict(data)
-    percent = ((judgment.meta or {}).get("progress") or {}).get("percent")
+    percent = judgment.facts.goal.percent if judgment.facts is not None else None
     return judgment, percent if isinstance(percent, (int, float)) else None
 
 
@@ -100,12 +102,51 @@ def main(argv: list[str] | None = None) -> int:
         print("--text 或 --auto 必须给一个", file=sys.stderr)
         return 2
 
-    ok, detail = client.play(text, animation=animation, meme=args.meme, duration=args.duration)
+    if args.meme and args.image:
+        print("--meme 与 --image 二选一：表情包和插画不能同时上", file=sys.stderr)
+        return 2
+
+    image_path: Path | None = None
+    if args.image:
+        image_path = Path(args.image).expanduser()
+        if not image_path.is_absolute():
+            image_path = cfg.root / image_path
+
+    ok, detail = client.play(
+        text,
+        animation=animation,
+        meme=args.meme,
+        duration=args.duration,
+        image=image_path,
+    )
+    image_used = bool(
+        ok
+        and image_path is not None
+        and image_path.is_file()
+        and "仅文字" not in detail
+        and "图未确认" not in detail
+    )
     if ok:
-        record_said(cfg.archive_for(args.date or date_type.today().isoformat()), text, animation)
+        record_said(
+            cfg.archive_for(args.date or date_type.today().isoformat()),
+            text,
+            animation,
+            image=image_used,
+        )
 
     if args.json:
-        print(json.dumps({"ok": ok, "detail": detail, "text": text, "animation": animation}, ensure_ascii=False))
+        print(
+            json.dumps(
+                {
+                    "ok": ok,
+                    "detail": detail,
+                    "text": text,
+                    "animation": animation,
+                    "image": None if image_path is None else str(image_path),
+                },
+                ensure_ascii=False,
+            )
+        )
     elif ok:
         suffix = f"（动画：{animation}）" if animation else ""
         print(f"✓ {detail}{suffix}")

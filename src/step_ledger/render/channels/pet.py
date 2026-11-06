@@ -15,8 +15,11 @@ dsh-pet 接口见 https://github.com/PC2005-cloud/dsh-pet（本机前缀 `/dsh-p
 from __future__ import annotations
 
 import json
+import secrets
+import threading
 import time
 from datetime import date as date_type
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -25,7 +28,7 @@ from typing import Any
 
 from ..base import BaseChannel
 from ...shared.profile import Profile, format_money
-from ...shared.types import Facts, Judgment, RenderContext, RenderResult
+from ...shared.types import Facts, Illustration, Judgment, RenderContext, RenderResult
 
 BUBBLE_LIMIT = 60
 REQUEST_TIMEOUT = 1.5
@@ -122,21 +125,31 @@ def style_for(day: str) -> tuple[str, str]:
 
 
 def recent_said(archive_dir: Path, limit: int = 3) -> list[str]:
-    """读最近几天的 pet_said.md，给 agent 一个「别重复」的参照。"""
+    """读最近几天的 pet_said.md，给 agent 一个「别重复」的参照。
+
+    先按「天」倒序、再按「行」倒序收集，取最近 `limit` 条后翻回正序；
+    否则多天归档时会把今天新说的那句挤掉。
+    """
     lines: list[str] = []
     for path in sorted(archive_dir.parent.glob("*/pet_said.md"), reverse=True)[:3]:
         try:
             text = path.read_text(encoding="utf-8")
         except OSError:
             continue
-        lines.extend(row[2:].strip() for row in text.splitlines() if row.startswith("- "))
-    return lines[-limit:]
+        day_lines = [row[2:].strip() for row in text.splitlines() if row.startswith("- ")]
+        lines.extend(reversed(day_lines))
+    return list(reversed(lines[:limit]))
 
 
-def record_said(archive_dir: Path, text: str, animation: str | None = None) -> None:
+def record_said(
+    archive_dir: Path, text: str, animation: str | None = None, *, image: bool = False
+) -> None:
     """记一笔今天说过的话，下次简报里就能提醒 agent 别重复。"""
     archive_dir.mkdir(parents=True, exist_ok=True)
-    suffix = f"（{animation}）" if animation else ""
+    tags = [animation] if animation else []
+    if image:
+        tags.append("图")
+    suffix = f"（{'，'.join(tags)}）" if tags else ""
     with (archive_dir / "pet_said.md").open("a", encoding="utf-8") as handle:
         handle.write(f"- {text}{suffix}\n")
 
@@ -181,6 +194,7 @@ def build_brief(
     base_url: str,
     pet_id: str,
     tiers: tuple[str, ...] = DEFAULT_TIERS,
+    illustration: Illustration | None = None,
 ) -> str:
     """给宿主 agent 的播报简报：事实 + 可发挥的空间 + 一条能照抄的命令。"""
     facts = judgment.facts
@@ -212,14 +226,30 @@ def build_brief(
         lines.append(rhythm)
     if judgment.degraded:
         lines.append("- ⚠️ 降级模式：判断来自本地模板，别说得太笃定")
+
+    illustration = illustration if illustration is not None else ctx.illustration
+    image_command = ""
+    if illustration is not None and illustration.image is not None:
+        image_command = f' --image "{illustration.image}"'
+        image_lines = [
+            "## 插画（有就带上）",
+            f"- 图：{illustration.image}（3:4）",
+            f"- 这一幕：{illustration.moment or '（没有写）'}",
+        ]
+    else:
+        reason = illustration.reason if illustration is not None else "未生成"
+        image_lines = ["## 插画", f"- 今天没有插画（{reason}），只播文字"]
+
     lines += [
+        "",
+        *image_lines,
         "",
         "## 你来定（这才是这一步的价值）",
         f"- **今天的口吻**：{style_name} —— {style_hint}",
         "- **一句话**：≤60 字，说人话。可以安慰、催一句、吐槽、或给一个具体动作；",
         "  不要照抄总结、不要编数字、不要用「先……再……」这种固定句式收尾。",
         "- **一段动画**：`--anim <名字>`；不给就让它用自己的碎碎念动画。",
-        "- **配图**：`--meme <名字>`（可选，见 `--list`）。",
+        "- **配图**：`--meme <名字>`（可选，见 `--list`）；有插画时不要再给，二选一。",
         "- **气泡时长**：`--duration <毫秒>`（可选，默认 10000）。",
         "",
         f"按进度，贴切的档位是「{suggested}」；但也可以不按档位，挑更活的一类。",
@@ -229,7 +259,7 @@ def build_brief(
         "",
         "## 播",
         "```bash",
-        'python scripts/pet_play.py --text "<你自己写的那句>" --anim "<你挑的动画>"',
+        f'python scripts/pet_play.py --text "<你自己写的那句>" --anim "<你挑的动画>"{image_command}',
         "python scripts/pet_play.py --list    # 这只宠物能播什么、有哪些表情包",
         "```",
         "",
@@ -239,6 +269,71 @@ def build_brief(
         "",
     ]
     return "\n".join(lines)
+
+
+def _image_mime(data: bytes) -> str:
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith(b"GIF8"):
+        return "image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return "application/octet-stream"
+
+
+class LocalImageServer:
+    """只服务一张图的 loopback 服务；图被取走就置位，用来给 dsh-pet 的 `url` 配图。"""
+
+    def __init__(self, path: Path) -> None:
+        self.path = Path(path)
+        self._server: ThreadingHTTPServer | None = None
+        self._thread: threading.Thread | None = None
+        self.fetched = threading.Event()
+        self.url = ""
+
+    def __enter__(self) -> "LocalImageServer":
+        data = self.path.read_bytes()
+        route = f"/{secrets.token_urlsafe(12)}/{urllib.parse.quote(self.path.name)}"
+        mime = _image_mime(data)
+        fetched = self.fetched
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                if self.path != route:
+                    self.send_error(404)
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", mime)
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(data)
+                fetched.set()
+
+            def log_message(self, *args: Any) -> None:
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        server.daemon_threads = True
+        self._server = server
+        self._thread = threading.Thread(target=server.serve_forever, daemon=True)
+        self._thread.start()
+        self.url = f"http://127.0.0.1:{server.server_address[1]}{route}"
+        return self
+
+    def wait(self, timeout: float) -> bool:
+        return self.fetched.wait(timeout)
+
+    def __exit__(self, *exc_info: object) -> None:
+        if self._server is not None:
+            self._server.shutdown()
+            self._server.server_close()
+            self._server = None
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
+            self._thread = None
 
 
 class PetClient:
@@ -273,11 +368,14 @@ class PetClient:
         animation: str | None = None,
         meme: str | None = None,
         duration: int | None = None,
+        image: Path | str | None = None,
     ) -> tuple[bool, str]:
         """让宠物说一句（可选配图/动画），成功与否以读回 `/state` 为准。"""
         text = (text or "").strip()
         if not text:
             return False, "文本为空"
+        if meme and image:
+            return False, "表情包与插画二选一"
         if not self.base_url:
             return False, "未配置 PET_BASE_URL"
         if not is_loopback(self.base_url):
@@ -291,17 +389,54 @@ class PetClient:
         if lock_id is None:
             return False, "取锁失败或被占用（详见下方原因）"
 
+        server: LocalImageServer | None = None
+        image_url: str | None = None
+        image_note = ""
+        if image:
+            image_path = Path(image)
+            if not image_path.is_file():
+                image_note = f"插画不存在：{image_path}"
+            else:
+                try:
+                    server = LocalImageServer(image_path)
+                    server.__enter__()
+                    image_url = server.url
+                except OSError as exc:
+                    image_note = f"图服务未启动：{exc}"
+
         try:
-            ok, detail = self._broadcast(surface, lock_id, text, animation, meme, duration)
+            ok, detail = self._broadcast(
+                surface, lock_id, text, animation, meme, duration, image_url
+            )
+            if not ok and image_url is not None:
+                # 图被拒（未知 url / 素材问题）不能连累文字：退回纯文字再投喂一次
+                image_note = f"配图被拒，改播文字（{detail}）"
+                image_url = None
+                ok, detail = self._broadcast(
+                    surface, lock_id, text, animation, meme, duration, None
+                )
             if not ok:
                 return False, detail
             if animation:
                 self._animate(surface, lock_id, animation)
+            if server is not None:
+                # 给渲染端一点时间取图；气泡会继续显示，服务随后关掉
+                wait = 3.0 if duration is None else min(max(duration / 1000, 1.0), 10.0)
+                server.wait(wait)
         finally:
+            if server is not None:
+                server.__exit__(None, None, None)
             self._release(surface, lock_id)
 
-        if not self._readback(text):
+        text_ok, url_ok = self._readback(text, image_url)
+        if not text_ok:
             return False, "投喂返回 ok，但 /state 里读不到这句话"
+        if image_url is not None and not url_ok:
+            return True, f"文字已播报：{text}（图未确认）"
+        if image_note:
+            return True, f"文字已播报：{text}（{image_note}，仅文字）"
+        if image_url is not None:
+            return True, f"已播报（带图）：{text}"
         return True, f"已播报：{text}"
 
     def surface(self) -> str | None:
@@ -336,9 +471,12 @@ class PetClient:
         animation: str | None,
         meme: str | None,
         duration: int | None,
+        image_url: str | None = None,
     ) -> tuple[bool, str]:
         body: dict[str, Any] = {"text": text, "anim": animation is None}
-        if meme:
+        if image_url:
+            body["url"] = image_url
+        elif meme:
             body["image"] = meme
         if duration is not None:
             body["duration"] = duration
@@ -386,13 +524,15 @@ class PetClient:
             body={"lockId": lock_id},
         )
 
-    def _readback(self, text: str) -> bool:
+    def _readback(self, text: str, image_url: str | None = None) -> tuple[bool, bool]:
         payload, error = self._request("GET", "/state")
         if error:
-            return False
+            return False, False
         pet = (payload.get("pets") or {}).get(self.pet_id) or {}
-        said = ((pet.get("say") or {}).get("data") or {}).get("text")
-        return said == text
+        data = (pet.get("say") or {}).get("data") or {}
+        text_ok = data.get("text") == text
+        url_ok = True if not image_url else data.get("url") == image_url
+        return text_ok, url_ok
 
     # ── HTTP ────────────────────────────────────────────────────
 
@@ -446,7 +586,14 @@ class PetChannel(BaseChannel):
             self._log(ctx.out_dir, "pet：今天没有素材，跳过播报")
             return RenderResult(channel=self.name, output="今天没有素材，跳过播报")
 
-        brief = build_brief(judgment, ctx, base_url=self.base_url, pet_id=self.pet_id, tiers=self.tiers)
+        brief = build_brief(
+            judgment,
+            ctx,
+            base_url=self.base_url,
+            pet_id=self.pet_id,
+            tiers=self.tiers,
+            illustration=ctx.illustration,
+        )
         ctx.out_dir.mkdir(parents=True, exist_ok=True)
         path = ctx.out_dir / "pet_task.md"
         path.write_text(brief, encoding="utf-8")
@@ -469,6 +616,7 @@ def suggest_animation(profile: Profile, tiers: tuple[str, ...] = DEFAULT_TIERS) 
 __all__ = [
     "BUBBLE_LIMIT",
     "DEFAULT_TIERS",
+    "LocalImageServer",
     "PetChannel",
     "PetClient",
     "bubble_text",

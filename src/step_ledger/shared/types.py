@@ -17,6 +17,30 @@ class CollectResult:
 
 
 @dataclass
+class Illustration:
+    """渲染阶段前置的插画产物：有图给路径，没图给原因。
+
+    失败是常态（没 key、没参考图、模型挂掉），所以 `reason` 和 `image` 一样重要。
+    """
+
+    image: Path | None = None
+    prompt: str = ""
+    moment: str = ""
+    lens: str = "moment"
+    reason: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ok": self.image is not None,
+            "image": None if self.image is None else str(self.image),
+            "prompt": self.prompt,
+            "moment": self.moment,
+            "lens": self.lens,
+            "reason": self.reason,
+        }
+
+
+@dataclass
 class RenderContext:
     """渲染层能拿到的一切：一个只用于写的目录，加上渠道自己的呈现记忆。
 
@@ -26,6 +50,7 @@ class RenderContext:
     out_dir: Path
     echo: bool = True
     recent_said: list[str] = field(default_factory=list)
+    illustration: Illustration | None = None
 
 
 @dataclass
@@ -57,6 +82,7 @@ class PipelineResult:
     materials_dir: Path
     archive_dir: Path
     judgment: Judgment | None = None
+    illustration: Illustration | None = None
     renders: list[RenderResult] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     settlements: list[SettleResult] = field(default_factory=list)
@@ -71,6 +97,7 @@ class PipelineResult:
             "skipped": self.skipped,
             "settlements": [item.to_dict() for item in self.settlements],
             "judgment": None if self.judgment is None else self.judgment.to_dict(),
+            "illustration": None if self.illustration is None else self.illustration.to_dict(),
             "renders": [
                 {
                     "channel": r.channel,
