@@ -27,7 +27,6 @@ from .judge.providers.openai_compatible import OpenAICompatibleProvider
 from .judge.providers.stub import StubProvider
 from .render.base import BaseChannel
 from .render.channels.console import ConsoleChannel
-from .render.channels.im import IMChannel
 from .render.channels.pet import PetChannel, recent_said
 from .shared.config import Config
 from .shared.profile import Profile, ensure_profile, load_profile
@@ -266,8 +265,6 @@ def _channel(cfg: Config, name: str) -> BaseChannel | None:
         return ConsoleChannel()
     if name == "pet":
         return PetChannel(cfg.pet_base_url, cfg.pet_id, cfg.pet_anim_tiers)
-    if name == "im":
-        return IMChannel()
     return None
 
 
