@@ -326,12 +326,15 @@ def generate_image(
 
 
 def _save_image(out_dir: Path, data: bytes) -> Path:
+    """写 `illustration.jpg`（当天最新）与一份带时间戳的副本（当天历史版本）。"""
     suffix = ".png" if data.startswith(b"\x89PNG\r\n\x1a\n") else ".jpg"
     path = out_dir / f"illustration{suffix}"
     for old in (out_dir / "illustration.jpg", out_dir / "illustration.png"):
         if old.exists() and old != path:
             old.unlink()
     path.write_bytes(data)
+    stamp = time.strftime("%H%M")
+    (out_dir / f"illustration-{stamp}{suffix}").write_bytes(data)
     return path
 
 
