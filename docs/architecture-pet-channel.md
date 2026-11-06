@@ -332,7 +332,7 @@ collect、归档布局。`RENDER_CHANNELS` 不加 `pet` 时零网络、零新文
 | `PET_ID` | `main` | 播报哪一只 |
 | `PET_ANIM_TIERS` | 空 | 只影响简报里的档位建议和 `--auto`；agent 手播时可以无视 |
 | `ILLUSTRATION_ENABLED` | `auto` | `auto` = 有 key 且开了 `pet` 才开；`off` = 强制关 |
-| `ILLUSTRATION_API_KEY` | 空 | 生图 key；空 = 不生成插画 |
+| `ILLUSTRATION_API_KEY` | 空 | **Agent Plan 专属 key**；Coding Plan key 调 `/api/plan` 会 401；空 = 不生成 |
 | `ILLUSTRATION_BASE_URL` | Agent Plan `/api/plan/v3` | 按量计费改 `/api/v3` |
 | `ILLUSTRATION_MODEL` | `doubao-seedream-5.0-flash` | 点号；写错会 404 |
 | `ILLUSTRATION_SIZE` | `2K` | 2K + 3:4（实测 1776×2368） |
@@ -379,12 +379,12 @@ collect、归档布局。`RENDER_CHANNELS` 不加 `pet` 时零网络、零新文
 |------|------|
 | 未配 `PET_BASE_URL` / 非本机 | 渠道跳过，`render.log` 一行，不写简报 |
 | 当天没有素材 | 静默跳过（不写简报、不播报），归档照常 |
-| 没配 `ILLUSTRATION_API_KEY` / `ILLUSTRATION_ENABLED=off` | 不生成插画；简报写「今天没有插画」，文字照播 |
-| 没参考图（`/character` 404 且没 `ILLUSTRATION_REFERENCE`） | 不画；不用通用角色冒充；简报写原因 |
-| 文本模型是 stub / 判断降级 | 不画；没有可信的上下文 |
-| 文本模型输出不是 JSON | 重试 1 次（只提醒「只输出 JSON」）；仍失败 → 跳过 |
-| `prompt` 里出现明细/多行金额/URL/商户名/尾号 | 机械拦下、打回重写 1 次；再犯 → 跳过 |
-| 图像 API 4xx / 5xx / 超时 | 跳过；`render.log` 记原因；不重试超过 1 次 |
+| 没配 `ILLUSTRATION_API_KEY` / `ILLUSTRATION_ENABLED=off` | 不生成新图；当天已有图沿用，否则简报写「今天没有插画」 |
+| 没参考图（`/character` 404 且没 `ILLUSTRATION_REFERENCE`） | 不生成新图；当天已有图沿用；不用通用角色冒充 |
+| 文本模型是 stub / 判断降级 | 不生成新图；当天已有图沿用；没有可信上下文 |
+| 文本模型输出不是 JSON | 重试 1 次（只提醒「只输出 JSON」）；仍失败 → 沿用已有图 / 跳过 |
+| `prompt` 里出现明细/多行金额/URL/商户名/尾号 | 机械拦下、打回重写 1 次；再犯 → 沿用已有图 / 跳过 |
+| 图像 API 4xx / 5xx / 超时 | 沿用已有图 / 跳过；`render.log` 记原因；不重试超过 1 次 |
 | 图片下载失败 | 跳过；已生成的 URL 不落盘 |
 | dsh-pet 没运行 | 管线正常结束；agent 跑脚本时退出码 2/1 并给出原因 |
 | 宠物 `display=none` / id 不存在 | 脚本报「找不到宠物或它没有显示」 |
@@ -396,6 +396,10 @@ collect、归档布局。`RENDER_CHANNELS` 不加 `pet` 时零网络、零新文
 | `--stage render` | 不重新生图；缺图按「今天没有插画」写简报 |
 | `--stage render` 触发了重算 | 旧图可能过期；不挂图，简报提示补 `--stage illustrate` |
 | 没人跑脚本（纯 cron） | 宠物不说话；要么 `--auto`，要么接受静默。插画可以照常生成，但没人播 |
+
+`all` / `illustrate` 里如果本次生成失败或跳过，`pipeline` 会 `load_existing` 沿用当天已有的图；
+只有确实没有图才写「今天没有插画」。`--stage render` 触发重算时例外：旧图可能和新的数字/文案
+对不上，此时**不挂图**，提示补 `--stage illustrate`。
 
 ## 11. 测试
 
@@ -412,7 +416,7 @@ collect、归档布局。`RENDER_CHANNELS` 不加 `pet` 时零网络、零新文
 | 时序回归 | `test_playback_http_timeout_outlives_long_poll` |
 | 管线集成 | `test_pipeline_pet_writes_brief_only`、`test_pipeline_without_pet_is_offline` |
 
-### 11.2 插画（`tests/test_illustration.py`，14 个）
+### 11.2 插画（`tests/test_illustration.py`，15 个）
 
 | 覆盖 | 实际用例 |
 |------|------|
@@ -420,7 +424,7 @@ collect、归档布局。`RENDER_CHANNELS` 不加 `pet` 时零网络、零新文
 | 机械拦报表 | `test_looks_like_report_allows_one_number`、`test_looks_like_report_rejects_amount_list` |
 | 参考图 | `test_reference_falls_back_to_local`、`test_reference_missing_is_skipped` |
 | 生图 / 落盘 | `test_run_writes_artifacts`、`test_load_existing_and_stale`、`test_local_image_server_serves_one_file` |
-| 降级 | `test_run_without_key_skips`、`test_run_skips_degraded`、`test_run_does_not_call_network_without_key` |
+| 降级 / 复用 | `test_run_without_key_skips`、`test_run_skips_degraded`、`test_run_does_not_call_network_without_key`、`test_pipeline_reuses_existing_when_generation_skips` |
 
 ## 12. 实测记录（2026-10-30，dsh-pet 0.3.8）
 

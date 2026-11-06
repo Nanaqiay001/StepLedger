@@ -75,9 +75,12 @@
 `.env`（gitignored）里配两行：
 
 ```bash
-ILLUSTRATION_API_KEY=...                                   # 生图 key
+ILLUSTRATION_API_KEY=...                                   # Agent Plan 专属 key
 ILLUSTRATION_MODEL=doubao-seedream-5.0-flash               # 默认值，可省
 ```
+
+`ILLUSTRATION_API_KEY` 必须是 **Agent Plan** 的 key；Coding Plan 的 key 调 `/api/plan/v3`
+会 401（它只能调文本）。
 
 可选：
 
@@ -103,9 +106,9 @@ PET_CHARACTER_ROOT=...            # 覆盖素材根
 
 ## 失败会怎样
 
-- 没 key / 判断降级 / 没有参考图 → **不画**，播报只播文字；
-- 文本模型写不出合法 JSON → 重试 1 次，再失败跳过；
-- 生图 API 失败 / 超时 → 跳过，日志里能看到原因；
+- 没 key / 判断降级 / 没有参考图 → **不生成新图**；当天已有图就沿用，没有才只播文字；
+- 文本模型写不出合法 JSON → 重试 1 次，再失败沿用当天已有图 / 跳过；
+- 生图 API 失败 / 超时 → 沿用当天已有图 / 跳过，日志里能看到原因；
 - 图服务起不来 / 配图被拒 → 自动改播纯文字，退出码仍为 0；
 - 任何情况下，`report.md`、`judgment.json`、`pet_task.md` 都照常产出。
 
