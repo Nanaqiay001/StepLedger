@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from step_ledger.pipeline import run as pipeline_run
 from step_ledger.render import illustration
 from step_ledger.render.channels.pet import LocalImageServer
 from step_ledger.render.illustration import (
@@ -24,7 +25,7 @@ from step_ledger.render.illustration import (
     run,
 )
 from step_ledger.shared.config import Config
-from step_ledger.shared.types import Judgment, RenderContext
+from step_ledger.shared.types import Illustration, Judgment, RenderContext
 
 DATE = "2026-11-06"
 GUIDE = "# 指南\n\n只写一个瞬间。\n\n---\n\n## 附录：调用方看这里\n"
@@ -257,3 +258,39 @@ def test_local_image_server_serves_one_file(tmp_path: Path) -> None:
         assert response.getheader("Content-Type") == "image/png"
         assert body == payload
         assert server.wait(1.0)
+
+
+def test_pipeline_reuses_existing_when_generation_skips(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("RENDER_CHANNELS", "console,pet")
+    monkeypatch.setenv("PET_BASE_URL", "http://127.0.0.1:9/dsh-pet-7340")
+    # 先放一张当天已生成的图
+    archive = tmp_path / "archive" / "2026-10-28"
+    archive.mkdir(parents=True)
+    (archive / "illustration.jpg").write_bytes(b"\xff\xd8\xff-old")
+    (archive / "illustration.json").write_text(
+        json.dumps(
+            {
+                "image": "illustration.jpg",
+                "lens": "moment",
+                "moment": "旧图这一幕",
+                "prompt": "旧图 prompt",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    # 本次生成失败，但当天已有图不该被丢掉
+    monkeypatch.setattr(
+        "step_ledger.pipeline.illustration.run",
+        lambda cfg, judgment, ctx: Illustration(reason="本次生成跳过"),
+    )
+
+    cfg = Config.load(tmp_path)
+    result = pipeline_run(date="2026-10-28", payload="午饭 35", config=cfg, echo=False)
+
+    assert result.illustration is not None
+    assert result.illustration.image == archive / "illustration.jpg"
+    assert "沿用当天已有图" in result.illustration.reason
+    assert "--image" in (archive / "pet_task.md").read_text(encoding="utf-8")
