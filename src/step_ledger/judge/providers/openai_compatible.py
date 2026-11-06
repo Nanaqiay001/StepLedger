@@ -77,6 +77,10 @@ class OpenAICompatibleProvider(BaseProvider):
             },
         )
 
+    def complete(self, system: str, user: str, *, temperature: float = 0.8) -> tuple[str, dict[str, Any]]:
+        """通用的一次对话：给插画写 prompt 用，不参与判断层的 observe/speak。"""
+        return self._chat(system, user, temperature=temperature)
+
     def _chat(self, system: str, user: str, *, temperature: float = 0.7) -> tuple[str, dict[str, Any]]:
         payload = {
             "model": self.model,

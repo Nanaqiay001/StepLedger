@@ -23,6 +23,15 @@ ENV_KEYS = (
     "PET_BASE_URL",
     "PET_ID",
     "PET_ANIM_TIERS",
+    "ILLUSTRATION_ENABLED",
+    "ILLUSTRATION_API_KEY",
+    "ILLUSTRATION_BASE_URL",
+    "ILLUSTRATION_MODEL",
+    "ILLUSTRATION_SIZE",
+    "ILLUSTRATION_QUALITY",
+    "ILLUSTRATION_REFERENCE",
+    "ILLUSTRATION_CHARACTER",
+    "PET_CHARACTER_ROOT",
 )
 
 DEFAULT_TARGET = 1_000_000
@@ -70,6 +79,15 @@ class Config:
     pet_base_url: str
     pet_id: str
     pet_anim_tiers: str
+    illustration_enabled: str
+    illustration_api_key: str
+    illustration_base_url: str
+    illustration_model: str
+    illustration_size: str
+    illustration_quality: str
+    illustration_reference: str
+    illustration_character: str
+    pet_character_root: str
 
     @property
     def profile_path(self) -> Path:
@@ -107,6 +125,19 @@ class Config:
             pet_base_url=(os.getenv("PET_BASE_URL") or "").strip(),
             pet_id=(os.getenv("PET_ID") or "main").strip(),
             pet_anim_tiers=(os.getenv("PET_ANIM_TIERS") or "").strip(),
+            illustration_enabled=(os.getenv("ILLUSTRATION_ENABLED") or "auto").strip().lower(),
+            illustration_api_key=(os.getenv("ILLUSTRATION_API_KEY") or "").strip(),
+            illustration_base_url=(
+                os.getenv("ILLUSTRATION_BASE_URL") or "https://ark.cn-beijing.volces.com/api/plan/v3"
+            ).strip(),
+            illustration_model=(
+                os.getenv("ILLUSTRATION_MODEL") or "doubao-seedream-5.0-flash"
+            ).strip(),
+            illustration_size=(os.getenv("ILLUSTRATION_SIZE") or "2K").strip(),
+            illustration_quality=(os.getenv("ILLUSTRATION_QUALITY") or "medium").strip(),
+            illustration_reference=(os.getenv("ILLUSTRATION_REFERENCE") or "").strip(),
+            illustration_character=(os.getenv("ILLUSTRATION_CHARACTER") or "").strip(),
+            pet_character_root=(os.getenv("PET_CHARACTER_ROOT") or "").strip(),
         )
 
 

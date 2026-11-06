@@ -37,6 +37,11 @@ sequenceDiagram
 token 都不花），再算今天。清点只更新记录、不播报；失败不阻塞今天。见
 [next-day-settle](feature-next-day-settle.md)。
 
+渲染阶段内部再分两步：**先 `illustrate`（可选：文本模型写 prompt → 图像模型出图），再进渠道排版**。
+渠道仍然零网络；图是共享产物，先给 pet，以后 console / IM 可直接复用。需求见
+[每日插画](feature-pet-illustration.md)，技术见
+[architecture-pet-channel.md](architecture-pet-channel.md)。
+
 设计取向是**定性，不定量**：架构里不放精确对账、预算阈值、分类报表。判断层允许模糊、允许主观，唯一硬要求是"有温度、说人话、仅供参考"。
 
 ## 调度归属：Skill 定流程，Agent 定时间
@@ -70,7 +75,8 @@ src/step_ledger/
 │   └── adapters/     # 素材来源适配器
 ├── judge/            # 层 2: 判断（给总结与建议）
 │   └── providers/    # AI Provider 适配层
-├── render/           # 层 3: 渲染（可视化 + 归档）
+├── render/           # 层 3: 渲染（插画 + 渠道投递 + 归档）
+│   ├── illustration.py  # 可选：文本模型写 prompt → 图像模型出图
 │   └── channels/     # 渲染渠道
 └── shared/           # 跨层共享（类型 + 配置 + 路径）
 ```
@@ -81,7 +87,7 @@ src/step_ledger/
 |----|------|------|------|
 | `collect` | 把各方素材收拢成文件 | 外部源 / 手动输入 | 素材文件夹 `materials/YYYY-MM-DD/` |
 | `judge` | 观察余额、算事实与趋势、写总结与建议 | 素材文件夹 + 档案 + `archive/`（≤ 当天） | `Judgment`（`facts` + `trend` + 两句话） |
-| `render` | 把 `Judgment` 排版并归档 | `Judgment` + 写目录 | 渲染产物（文本/图片/网页）+ 归档路径 |
+| `render` | 可选先生成插画，再把 `Judgment` 排版并归档 | `Judgment` + 写目录 | 渲染产物（插画/文本/图片/网页）+ 归档路径 |
 | `pipeline` | 顺序编排各层 | 配置 | `PipelineResult` |
 
 ### 层间契约
@@ -99,6 +105,8 @@ src/step_ledger/
 - **素材来源**：继承 `BaseAdapter`，实现 `collect() -> Path`（返回当天素材目录）
 - **AI Provider**：继承 `BaseProvider`，实现 `observe(materials_text, date) -> Observation`
   与 `speak(materials_dir, profile, date, facts, trend) -> Judgment`
+- **图像 Provider**（草案）：实现 `generate(prompt, refs) -> bytes`；第一版只接 Ark Seedream，
+  不引第三方 SDK
 - **渲染渠道**：继承 `BaseChannel`，实现 `render(judgment: Judgment) -> Path | str`
 
 ## 当前实现状态
@@ -115,12 +123,17 @@ src/step_ledger/
 - [x] 真实 AI Provider（OpenAI 兼容，失败自动降级到 stub）
 - [x] 测试（冒烟 / 契约 / 隐私扫描）
 - [x] 桌宠播报渠道 `pet`（渲染层只写 `pet_task.md` 简报，由宿主 agent 用
-  `scripts/pet_play.py` 决定说什么、播什么；spec 见 [feature-pet-channel.md](feature-pet-channel.md)）
+  `scripts/pet_play.py` 决定说什么、播什么；架构见
+  [architecture-pet-channel.md](architecture-pet-channel.md)，需求见
+  [feature-pet-channel.md](feature-pet-channel.md)）
+- [x] 每日插画 `illustrate`（MVP：文本模型写 prompt → Ark Seedream 出图；失败跳过，
+  需求见 [feature-pet-illustration.md](feature-pet-illustration.md)，架构见
+  [architecture-pet-channel.md](architecture-pet-channel.md)）
 
 ### 实现备注
 
 - 入口：`scripts/daily_run.py`（cron 兜底）、`python -m step_ledger`、`step-ledger`（安装后）
-- 分阶段：`--stage collect|judge|render`，用于补投素材与断点续跑
+- 分阶段：`--stage collect|judge|illustrate|render`，用于补投素材与断点续跑
 - 自动素材夹：`COLLECT_SOURCE_DIRS`（逗号分隔，可指向 iCloud 等被快捷指令写入的目录）；
   `--source` 可临时覆盖。文件归属日期优先取文件名里的 `20261028` / `2026-10-28`，没有才看修改时间；
   同名源文件按原文件名覆盖成当天最新快照（源文件当天追加不会变成多份素材）

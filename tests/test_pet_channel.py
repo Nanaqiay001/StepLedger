@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import time
 import urllib.error
@@ -14,6 +15,7 @@ from step_ledger.pipeline import run
 from step_ledger.render.channels.pet import (
     BUBBLE_LIMIT,
     DEFAULT_TIERS,
+    LocalImageServer,
     PetChannel,
     PetClient,
     bubble_text,
@@ -26,14 +28,9 @@ from step_ledger.render.channels.pet import (
 )
 from step_ledger.shared.config import Config
 from step_ledger.shared.profile import parse_profile
-from step_ledger.shared.types import Facts, GoalFacts, Judgment, RenderContext
+from step_ledger.shared.types import Facts, GoalFacts, Illustration, Judgment, RenderContext
 
 BASE = "http://127.0.0.1:9/dsh-pet-7340"
-def _load_pet_daily():
-    spec = importlib.util.spec_from_file_location("pet_daily", SCRIPT)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 
@@ -66,6 +63,7 @@ class FakePet:
         playback: str = "ended",
         fail_at: int | None = None,
         echo: bool = True,
+        reject_url: bool = False,
     ) -> None:
         self.display = display
         self.lock = lock
@@ -73,7 +71,9 @@ class FakePet:
         self.playback = playback
         self.fail_at = fail_at
         self.echo = echo
+        self.reject_url = reject_url
         self.last_text: str | None = None
+        self.last_url: str | None = None
         self.calls: list[dict] = []
         self.sleeps: list[float] = []
 
@@ -108,20 +108,36 @@ class FakePet:
             }
         if path.endswith("/state"):
             text = self.last_text if self.echo else "别的话"
-            return {"pets": {"main": {"say": {"data": {"text": text}}}}}
+            data: dict[str, str | None] = {"text": text}
+            if self.last_url:
+                data["url"] = self.last_url
+            return {"pets": {"main": {"say": {"data": data}}}}
         if path.endswith("/lock/release"):
             return {"ok": True}
         if path.endswith("/lock"):
             return {"ok": True, "lockId": "lk-test"} if self.lock else {"ok": False, "reason": "locked"}
         if path.endswith("/broadcast"):
             body = self.calls[-1]["body"] or {}
+            if self.reject_url and body.get("url"):
+                return {"ok": False, "reason": "bad-request"}
             self.last_text = body.get("text")
+            self.last_url = body.get("url")
+            if self.last_url:
+                self._fetch(self.last_url)
             return {"ok": True}
         if path.endswith("/anim"):
             return {"ok": True, "playbackId": "pb-test"} if self.anim else {"ok": False, "reason": "unknown-animation"}
         if "/playback/" in path:
             return {"playbackId": "pb-test", "status": self.playback}
         raise AssertionError(f"未预期的请求：{path}")
+
+    def _fetch(self, url: str) -> None:
+        """用 http.client 取图，绕开被 monkeypatch 的 urllib。"""
+        parts = urllib.parse.urlsplit(url)
+        connection = http.client.HTTPConnection(parts.hostname, parts.port, timeout=2)
+        connection.request("GET", parts.path)
+        connection.getresponse().read()
+        connection.close()
 
     @property
     def paths(self) -> list[str]:
@@ -245,6 +261,42 @@ def test_brief_lists_recent_lines(tmp_path: Path) -> None:
     assert recent_said(out) == ["昨天那句（照镜子）"]
 
 
+def test_recent_said_keeps_todays_line_across_days(tmp_path: Path) -> None:
+    record_said(tmp_path / "archive" / "2026-10-28", "旧一")
+    record_said(tmp_path / "archive" / "2026-10-28", "旧二")
+    record_said(tmp_path / "archive" / "2026-10-29", "今天这句")
+
+    assert recent_said(tmp_path / "archive" / "2026-10-29", limit=2) == ["旧二", "今天这句"]
+    assert recent_said(tmp_path / "archive" / "2026-10-29", limit=3) == ["旧一", "旧二", "今天这句"]
+
+
+def test_brief_includes_illustration(tmp_path: Path) -> None:
+    image = tmp_path / "illustration.jpg"
+    illustration = Illustration(image=image, moment="夜里看小票", lens="moment")
+
+    brief = build_brief(
+        _judgment(), _ctx(tmp_path), base_url=BASE, pet_id="main", illustration=illustration
+    )
+
+    assert "## 插画" in brief
+    assert "夜里看小票" in brief
+    assert '--image "' in brief
+    assert "今天没有插画" not in brief
+
+
+def test_brief_says_no_illustration(tmp_path: Path) -> None:
+    brief = build_brief(
+        _judgment(),
+        _ctx(tmp_path),
+        base_url=BASE,
+        pet_id="main",
+        illustration=Illustration(reason="没配 key"),
+    )
+
+    assert "今天没有插画（没配 key）" in brief
+    assert "--image" not in brief
+
+
 def test_record_said_appends(tmp_path: Path) -> None:
     record_said(tmp_path, "第一句", "收红包")
     record_said(tmp_path, "第二句")
@@ -346,6 +398,71 @@ def test_play_with_meme_and_duration(fake: FakePet) -> None:
     assert ok
     say = next(c for c in fake.calls if c["path"].endswith("/broadcast"))
     assert say["body"] == {"text": "又超了啊", "anim": True, "image": "要不直接骂他", "duration": 8000}
+
+
+def test_play_with_image_serves_and_reads_back(fake: FakePet, tmp_path: Path) -> None:
+    image = tmp_path / "illustration.jpg"
+    image.write_bytes(b"\xff\xd8\xff-fake")
+
+    ok, detail = PetClient(BASE).play("带图说一句", image=image)
+
+    assert ok, detail
+    say = next(c for c in fake.calls if c["path"].endswith("/broadcast"))
+    assert say["body"]["text"] == "带图说一句"
+    assert say["body"]["url"].startswith("http://127.0.0.1:")
+    assert "image" not in say["body"]
+    assert fake.last_url == say["body"]["url"]
+
+
+def test_play_rejects_meme_and_image(fake: FakePet, tmp_path: Path) -> None:
+    image = tmp_path / "illustration.jpg"
+    image.write_bytes(b"\xff\xd8\xff")
+
+    ok, detail = PetClient(BASE).play("二选一", meme="要不直接骂他", image=image)
+
+    assert not ok
+    assert "二选一" in detail
+    assert fake.calls == []
+
+
+def test_play_missing_image_falls_back_to_text(fake: FakePet, tmp_path: Path) -> None:
+    ok, detail = PetClient(BASE).play("只播文字", image=tmp_path / "nope.jpg")
+
+    assert ok
+    assert "仅文字" in detail
+    say = next(c for c in fake.calls if c["path"].endswith("/broadcast"))
+    assert "url" not in say["body"]
+
+
+def test_play_url_rejected_falls_back_to_text(fake: FakePet, tmp_path: Path) -> None:
+    fake.reject_url = True
+    image = tmp_path / "illustration.jpg"
+    image.write_bytes(b"\xff\xd8\xff")
+
+    ok, detail = PetClient(BASE).play("图被拒也要说话", image=image)
+
+    assert ok
+    assert "改播文字" in detail
+    broadcasts = [c for c in fake.calls if c["path"].endswith("/broadcast")]
+    assert len(broadcasts) == 2
+    assert "url" in broadcasts[0]["body"]
+    assert "url" not in broadcasts[1]["body"]
+    assert fake.last_text == "图被拒也要说话"
+
+
+def test_local_image_server_404(tmp_path: Path) -> None:
+    image = tmp_path / "illustration.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\nfake")
+
+    with LocalImageServer(image) as server:
+        parts = urllib.parse.urlsplit(server.url)
+        connection = http.client.HTTPConnection(parts.hostname, parts.port, timeout=2)
+        connection.request("GET", "/wrong")
+        response = connection.getresponse()
+        response.read()
+        connection.close()
+
+        assert response.status == 404
 
 
 def test_play_readback_mismatch_is_failure(fake: FakePet) -> None:
