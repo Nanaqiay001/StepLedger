@@ -3,6 +3,31 @@
 ## Changelog
 
 ### 2026-11-06
+- **每日插画（v4 MVP）**：新增 [feature-pet-illustration.md](feature-pet-illustration.md) —
+  文本模型按 [prompt 指南](prompt-pet-illustration.md) 从 `Judgment` 挑一个瞬间写成 prompt，
+  图像模型（Ark Seedream）出 3:4 图；产物 `illustration_prompt.md` / `illustration.jpg` /
+  `illustration.json`，失败整段跳过
+- **真实跑通**：`main-character.png` 作参考图，`doubao-seedream-5-0-flash` 出 1776×2368
+  JPEG（29 秒 / 16,428 tokens），角色一致、图里只有一个「81」和一个「收一收」；
+  文本 prompt 用了 6,207 tokens（指南较长，命中 3,840 缓存）
+- **`illustrate` 是管线的一步，不是渠道**：`render/illustration.py` 负责 guide 截断、
+  `JUDGE_*` 写 prompt、机械拦报表、取参考图、调图像模型、落盘；`pipeline.run` 在
+  `judge` 之后、`_render` 之前调用，`--stage illustrate` 可单独补图
+- **`PetClient.play(image=...)`**：起一个只服务单文件的 loopback 服务，`/broadcast` 传 `url`，
+  图被取走即关；图服务起不来 / 文件不存在退回纯文字；`--meme` 与 `--image` 互斥
+- **修掉 `pet_play.py --auto` 的旧债**：它还在读已退役的 `judgment.meta`，改为
+  `judgment.facts.goal.percent`
+- **测试 191 项全过**（新增 22 项：指南/prompt 解析、报表拦截、参考图回退、落盘、降级、
+  本地图服务、带图播报、简报插画段、多天 recent_said 回归）
+- **feature / architecture 拆开**：`feature-pet-channel.md` 只留用户视角（要什么、看到什么、
+  验收）；技术细节（时序、分工、接口、失败矩阵、改动范围、测试）统一进
+  [architecture-pet-channel.md](architecture-pet-channel.md)，避免一份文档既当需求又当设计
+- **pet 通道架构升到 v4**：`illustrate` 放在 `judge` 之后、渠道之前；渠道仍然零网络，
+  `pet_play.py --image` 用 loopback 临时服务把本地图喂给 dsh-pet（`/broadcast` 的 `url`），
+  图服务起不来就退回纯文字
+- **prompt 指南补全「主角怎么取」**：`GET /config` 找 `PET_ID` → 条目 key = 素材根 →
+  `GET /character?root=` 取三视图；`whisperPrompt` 是行为语气、不是视觉设定；
+  旧版 dsh-pet 没有 `/character` 时回退本地参考图，两者都没有就不出图
 - **次日清点（settle）**：`--stage all` 先清点昨天再算今天。判据是素材指纹
   （文件名 + 字节），没变就 0 次模型调用、一个字节都不重写；变了整份重判，但只渲染
   非播报渠道（`BaseChannel.broadcast`），不写 `pet_task.md`
@@ -288,6 +313,19 @@
 
 ## Lessons Learned
 
+- **图字可以同框，但不能变成报表**：数字和台词只做点睛（一个关键数 + 一句短句），
+  明细列表、表格、四格漫画一律不做；文字写不清就宁可不写，别让它盖住画面。
+- **角色一致性靠参考图，不靠形容词**：同一段文字描述每天也会画出不同的人；一张角色三视图
+  比十行「蓝发、鲸鱼耳、白围裙」管用。参考图缺失时宁可不画，别用「通用蓝发人鱼」冒充。
+- **生图不进渠道**：渠道是投递，重跑一次就多花一次钱；把 `illustrate` 放在渠道之前，
+  渠道的「零网络」断言才守得住，`--stage render` 才不会偷偷调模型。
+- **`whisperPrompt` 不是角色设定**：它是行为语气（「20 字以内、温柔」），拿它当外观描述
+  只会让模型画出另一个人。视觉设定要么用参考图，要么单独写角色卡。
+- **prompt 指南是运行时资产，不是一次性文档**：它会进 system prompt、要版本化、要能单独
+  评审；写死在代码里会让「调口味」变成改 Python。指南越长，每天那次调用的成本越高——
+  调用方附录要切掉（`---` 之前），别把 HTTP 示例也喂给模型。
+- **自动化的第一步先跑一遍真图**：指南写得再顺，也要用真实参考图 + 真实模型出一次，
+  量出尺寸/tokens/耗时；这次实测 2K 图 16k tokens、29 秒，和文档估算对得上。
 - **定时任务里的「当天素材」往往只是「截至运行时刻的素材」**。判断层若把快照当全天，
   就会用半天的数据下全天的结论；先改口径（最近三天 / 一周），再谈补数据。历史回望能让
   单日截断不主导结论，但补不出 21:00 之后真实发生的交易——这两件事要分开说。
