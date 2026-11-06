@@ -134,6 +134,18 @@ python scripts/daily_run.py --stage render
 python scripts/daily_run.py --json --no-echo
 ```
 
+### IM 补发（`RENDER_CHANNELS` 含 `im` 时）
+
+IM 机器人常常只能**回复**、不能**主动推**，定时那一轮发出去也到不了。所以 `im` 渠道只产出
+`archive/<日期>/im_task.md`（正文 ≤4 行 + 图路径 + 补发步骤），由宿主在下一条用户消息时补发：
+
+```bash
+ls -1 archive/*/im_task.md 2>/dev/null | while read f; do [ -f "$f.sent" ] || echo "PENDING $f"; done
+```
+
+有 PENDING 就补最新一期：正文照发、`trend.svg` 转 PNG 一起发、然后 `touch .sent`。
+多期只补最新，其余合并一句「还有 N 期没补」。
+
 ### 定时任务与日志调试（workspace）
 
 ```bash
