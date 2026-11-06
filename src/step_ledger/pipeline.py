@@ -120,6 +120,14 @@ def run(
         )
         if stage in ("all", "illustrate"):
             result.illustration = illustration.run(cfg, result.judgment, ctx)
+            if result.illustration.image is None:
+                # 本次没画出来（key/参考图/接口失败），别把当天已有的图丢掉
+                existing = illustration.load_existing(archive_dir)
+                if existing is not None and existing.image is not None:
+                    skip_reason = result.illustration.reason
+                    existing.reason = f"沿用当天已有图（本次生成跳过：{skip_reason}）"
+                    result.illustration = existing
+                    _log(archive_dir, f"插画沿用已有：本次生成跳过（{skip_reason}）")
             ctx.illustration = result.illustration
         elif stage == "render":
             # 只读已有插画；这轮重算过就把旧图当过期，不挂到简报里
