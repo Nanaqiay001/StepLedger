@@ -28,6 +28,24 @@ def material_files(materials_dir: Path) -> list[Path]:
     return sorted(p for p in materials_dir.iterdir() if p.is_file() and p.name != "profile.md")
 
 
+def fingerprint(materials_dir: Path) -> str:
+    """素材目录的内容指纹：文件名 + 字节，顺序无关。
+
+    追加了一行就变，没变就同一串——清点靠它决定要不要花 token。
+    """
+    hasher = hashlib.sha1()
+    for path in material_files(materials_dir):
+        try:
+            data = path.read_bytes()
+        except OSError:
+            continue
+        hasher.update(path.name.encode("utf-8"))
+        hasher.update(b"\0")
+        hasher.update(data)
+        hasher.update(b"\0")
+    return hasher.hexdigest()
+
+
 def store_file(source: Path, materials_dir: Path) -> Path | None:
     """把 source 复制进素材夹，文件名带内容哈希；已存在则返回 None（幂等）。"""
     data = source.read_bytes()
@@ -90,4 +108,5 @@ __all__ = [
     "material_files",
     "store_file",
     "READABLE_SUFFIXES",
+    "fingerprint",
 ]

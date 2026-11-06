@@ -38,6 +38,18 @@ class RenderResult:
 
 
 @dataclass
+class SettleResult:
+    """一次「次日清点」的结果。补账是修正记录，不是新闻。"""
+
+    day: str
+    status: str          # updated | unchanged | skipped | failed
+    reason: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"day": self.day, "status": self.status, "reason": self.reason}
+
+
+@dataclass
 class PipelineResult:
     """一次管线运行的全部结果，供 CLI / agent 转述。"""
 
@@ -47,6 +59,7 @@ class PipelineResult:
     judgment: Judgment | None = None
     renders: list[RenderResult] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
+    settlements: list[SettleResult] = field(default_factory=list)
     stage: str = "all"
 
     def to_dict(self) -> dict[str, Any]:
@@ -56,6 +69,7 @@ class PipelineResult:
             "materials_dir": str(self.materials_dir),
             "archive_dir": str(self.archive_dir),
             "skipped": self.skipped,
+            "settlements": [item.to_dict() for item in self.settlements],
             "judgment": None if self.judgment is None else self.judgment.to_dict(),
             "renders": [
                 {
