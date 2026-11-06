@@ -428,6 +428,7 @@ class PetChannel(BaseChannel):
     """渲染渠道：产出一份《播报简报》，交给宿主 agent 去播。不发任何网络请求。"""
 
     name = "pet"
+    broadcast = True
 
     def __init__(self, base_url: str = "", pet_id: str = "main", tiers: str = "") -> None:
         self.base_url = (base_url or "").strip().rstrip("/")

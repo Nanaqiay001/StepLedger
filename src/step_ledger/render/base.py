@@ -11,6 +11,8 @@ class BaseChannel(ABC):
     """渲染渠道的扩展点。终端 / 图片 / 网页都实现同一个接口。"""
 
     name: str = "base"
+    #: 是否会「播出去」（推给外部、打扰用户）。清点历史时只渲染非播报渠道。
+    broadcast: bool = False
 
     @abstractmethod
     def render(self, judgment: Judgment, ctx: RenderContext) -> RenderResult:

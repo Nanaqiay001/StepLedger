@@ -15,20 +15,29 @@ import argparse
 import json
 import sys
 from datetime import date as date_type
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from .collect.adapters.folder import FolderAdapter
-from .collect.adapters.manual import ManualAdapter, material_files
+from .collect.adapters.manual import ManualAdapter, fingerprint, material_files
 from .judge.base import ProviderError
 from .judge import secretary
 from .judge.history import History
 from .judge.providers.openai_compatible import OpenAICompatibleProvider
 from .judge.providers.stub import StubProvider
+from .render.base import BaseChannel
 from .render.channels.console import ConsoleChannel
 from .render.channels.pet import PetChannel, recent_said
 from .shared.config import Config
 from .shared.profile import Profile, ensure_profile, load_profile
-from .shared.types import CollectResult, Judgment, PipelineResult, RenderContext, RenderResult
+from .shared.types import (
+    CollectResult,
+    Judgment,
+    PipelineResult,
+    RenderContext,
+    RenderResult,
+    SettleResult,
+)
 
 
 def run(
@@ -57,6 +66,18 @@ def run(
         collected.files = material_files(materials_dir)
 
     profile = _load_or_create_profile(cfg.profile_path, create=stage in ("all", "judge"))
+
+    if stage == "all" and run_date == date_type.today().isoformat():
+        # 先清点昨天：昨天的余额没清干净，今天算「今天花了多少」时会把那笔算到今天头上
+        for offset in range(max(cfg.lookback_days, 0), 0, -1):
+            target = (date_type.fromisoformat(run_date) - timedelta(days=offset)).isoformat()
+            try:
+                settlement = settle(cfg=cfg, day=target, provider=provider, echo=False)
+            except Exception as exc:  # 清点失败不能拖垮今天
+                settlement = SettleResult(day=target, status="failed", reason=str(exc))
+            result.settlements.append(settlement)
+            if settlement.status == "failed":
+                _log(archive_dir, f"清点 {target} 失败：{settlement.reason}")
 
     if stage in ("all", "judge"):
         result.judgment = _judge(cfg, materials_dir, profile, run_date, provider)
@@ -134,7 +155,7 @@ def _judge(
     else:
         provider = StubProvider()
 
-    return secretary.run(
+    judgment = secretary.run(
         materials_dir=materials_dir,
         profile=profile,
         date=run_date,
@@ -145,6 +166,70 @@ def _judge(
         backfilled=run_date < date_type.today().isoformat(),
         provider_error=provider_error,
     )
+    # 记下这次判断消费的素材指纹：次日清点靠它判断「要不要重判」
+    judgment.runtime["materials_digest"] = fingerprint(materials_dir)
+    return judgment
+
+
+def settle(
+    *,
+    cfg: Config,
+    day: str,
+    provider: str | None = None,
+    echo: bool = False,
+) -> SettleResult:
+    """次日清点：素材变了才重判昨天，没变一个 token 都不花。
+
+    这是**修正记录**，不是新闻：只渲染非播报渠道，不写 `pet_task.md`。
+    """
+    archive_dir = cfg.archive_for(day)
+    if not (archive_dir / "judgment.json").is_file():
+        # 连续漏跑不在这次范围：没有归档就没有「修正」，另开补账语义
+        return SettleResult(day=day, status="skipped", reason="没有归档，跳过清点")
+
+    previous = _read_judgment(archive_dir)
+    materials_dir = cfg.materials_for(day)
+    # 源文件还在就再拉一次最新快照；不在就保持原素材，不动
+    _collect(cfg, day, materials_dir, None, None)
+
+    current = fingerprint(materials_dir)
+    recorded = previous.runtime.get("materials_digest")
+    if recorded and recorded == current:
+        return SettleResult(day=day, status="unchanged")
+
+    profile = load_profile(cfg.profile_path)
+    if not material_files(materials_dir):
+        if previous.facts is None:
+            filled = secretary.backfill(
+                judgment=previous,
+                profile=profile,
+                date=day,
+                history=History(cfg.archive_dir, day=day),
+            )
+            filled.runtime["settled"] = _settle_note(recorded, current, rewrote_prose=False)
+            _write_judgment(filled, archive_dir)
+            return SettleResult(day=day, status="updated", reason="只补事实，保留原文")
+        return SettleResult(day=day, status="skipped", reason="素材已清理，保留原记录")
+
+    judgment = _judge(cfg, materials_dir, profile, day, provider)
+    if judgment.degraded and not previous.degraded:
+        # 宁可不清，也不能拿模板话覆盖当初的文本（D5 的教训）
+        return SettleResult(day=day, status="failed", reason="模型不可用，保留原记录")
+
+    judgment.runtime["settled"] = _settle_note(recorded, current, rewrote_prose=True)
+    _write_judgment(judgment, archive_dir)
+    ctx = RenderContext(out_dir=archive_dir, echo=echo, recent_said=recent_said(archive_dir))
+    _render(cfg, judgment, ctx, only_record=True)
+    return SettleResult(day=day, status="updated")
+
+
+def _settle_note(before: str | None, after: str, *, rewrote_prose: bool) -> dict:
+    return {
+        "at": datetime.now().isoformat(timespec="seconds"),
+        "from": before or "",
+        "to": after,
+        "rewrote_prose": rewrote_prose,
+    }
 
 
 def _build_provider(cfg: Config, name: str):
@@ -175,18 +260,27 @@ def _refresh_mode(
     return None
 
 
-def _render(cfg: Config, judgment: Judgment, ctx: RenderContext) -> list[RenderResult]:
+def _channel(cfg: Config, name: str) -> BaseChannel | None:
+    if name == "console":
+        return ConsoleChannel()
+    if name == "pet":
+        return PetChannel(cfg.pet_base_url, cfg.pet_id, cfg.pet_anim_tiers)
+    return None
+
+
+def _render(
+    cfg: Config, judgment: Judgment, ctx: RenderContext, *, only_record: bool = False
+) -> list[RenderResult]:
     renders: list[RenderResult] = []
     for name in cfg.channels:
-        channel = {
-            "console": ConsoleChannel,
-            "pet": lambda: PetChannel(cfg.pet_base_url, cfg.pet_id, cfg.pet_anim_tiers),
-        }.get(name)
+        channel = _channel(cfg, name)
         if channel is None:
             _log(ctx.out_dir, f"未知渠道，已跳过：{name}")
             continue
+        if only_record and channel.broadcast:
+            continue  # 清点历史：只改记录，不打扰
         try:
-            renders.append(channel().render(judgment, ctx))
+            renders.append(channel.render(judgment, ctx))
         except Exception as exc:  # 一个渠道挂了不拖垮整条管线
             _log(ctx.out_dir, f"{name} 渲染失败：{exc}")
 
@@ -259,10 +353,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", help="项目根目录，默认当前目录或 STEP_LEDGER_ROOT")
     parser.add_argument("--stage", choices=("all", "collect", "judge", "render"), default="all")
     parser.add_argument("--provider", help="临时覆盖 JUDGE_PROVIDER（stub / openai）")
+    parser.add_argument("--settle", action="store_true", help="清点指定日期（默认昨天）的账，不播报")
     parser.add_argument("--rebuild", action="store_true", help="全量重算所有归档日（每天一次模型调用）")
     parser.add_argument("--json", action="store_true", help="以 JSON 输出运行结果")
     parser.add_argument("--no-echo", action="store_true", help="不往终端打印渲染结果")
     args = parser.parse_args(argv)
+
+    if args.settle:
+        cfg = Config.load(args.root)
+        day = args.date or (date_type.today() - timedelta(days=1)).isoformat()
+        outcome = settle(cfg=cfg, day=day, provider=args.provider, echo=not (args.json or args.no_echo))
+        print(f"清点 {day}：{outcome.status}" + (f"（{outcome.reason}）" if outcome.reason else ""))
+        return 0 if outcome.status != "failed" else 1
 
     if args.rebuild:
         results = rebuild(root=args.root, provider=args.provider, echo=not args.no_echo)
