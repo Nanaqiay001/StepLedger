@@ -86,7 +86,7 @@ def run(
         history=history,
         backfilled=backfilled,
     )
-    trend = summarize_trend(day=date, history=history, facts=facts)
+    trend = summarize_trend(day=date, history=history, facts=facts, profile=profile)
 
     if not files:
         judgment = StubProvider().speak(materials_dir, profile, date, facts, trend)
@@ -137,7 +137,7 @@ def backfill(*, judgment: Judgment, profile: Profile, date: str, history: Histor
         backfilled=True,
     )
     judgment.facts = facts
-    judgment.trend = summarize_trend(day=date, history=history, facts=facts)
+    judgment.trend = summarize_trend(day=date, history=history, facts=facts, profile=profile)
     judgment.runtime = {**judgment.runtime, "facts_backfilled": True}
     return judgment
 
