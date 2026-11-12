@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import re
 from calendar import monthrange
 from datetime import date as date_type
 from datetime import timedelta
@@ -32,6 +33,7 @@ from ..shared.types import (
 from .history import History
 
 WINDOW_DAYS = 14
+_DAY_RE = re.compile(r"(\d{1,2})\s*[号日]")
 
 
 def compute(
@@ -71,7 +73,7 @@ def compute(
         months=months,
         history=history,
     )
-    pace = _pace(day=day, month=month, balance=balance, history=history)
+    pace = _pace(day=day, month=month, balance=balance, history=history, profile=profile)
     return Facts(
         date=day,
         backfilled=backfilled,
@@ -87,6 +89,7 @@ def summarize_trend(
     day: str,
     history: History,
     facts: Facts,
+    profile: Profile | None = None,
     window: int = WINDOW_DAYS,
 ) -> TrendSummary:
     """近两周的每日花销 + 周环比 + 超支天数 + 最低余额 + 进度历史。"""
@@ -103,7 +106,7 @@ def summarize_trend(
         if start_text <= as_of <= day:
             balances[as_of] = facts.balance.value
 
-    spent = _spent_by_day(balances)
+    spent = _spent_by_day(balances, profile)
     quota = facts.pace.quota if facts.pace is not None else None
     month_key = facts.month.key if facts.month is not None else None
 
@@ -193,6 +196,9 @@ def _month(
         and spent_as_of > baseline_date
     ):
         spent = baseline - current
+        spent += _income_seen(profile, today)
+        spent -= _transfer_seen(profile, today)
+        spent = max(spent, 0)
 
     income = parse_amount(profile.agreements.get("月收入"))
     provident = parse_amount(profile.agreements.get("公积金月缴存")) or 0
@@ -229,7 +235,7 @@ def _current_balance(
     return previous
 
 
-def _pace(*, day: str, month: MonthFacts | None, balance: BalanceObs, history: History) -> PaceFacts | None:
+def _pace(*, day: str, month: MonthFacts | None, balance: BalanceObs, history: History, profile: Profile) -> PaceFacts | None:
     if month is None or month.spendable is None or month.spent is None:
         return None
     try:
@@ -248,7 +254,11 @@ def _pace(*, day: str, month: MonthFacts | None, balance: BalanceObs, history: H
     if balance.value is not None and (balance.as_of or day) == day:
         previous = history.last_balance_before(day)
         if previous is not None:
-            today_spent = previous[1] - balance.value
+            raw = previous[1] - balance.value
+            if raw < 0:  # 余额涨了：当天有入账，按约定把入账和转存扣掉
+                raw += _income_seen(profile, today)
+                raw -= _transfer_seen(profile, today)
+            today_spent = raw
 
     return PaceFacts(
         days=days,
@@ -262,14 +272,58 @@ def _pace(*, day: str, month: MonthFacts | None, balance: BalanceObs, history: H
     )
 
 
-def _spent_by_day(balances: dict[str, int]) -> dict[str, int]:
-    """相邻两个已知余额的差，记在后一个日期上；空档不插值。"""
+def _spent_by_day(balances: dict[str, int], profile: Profile | None = None) -> dict[str, int]:
+    """相邻两个已知余额的差，记在后一个日期上；空档不插值。
+
+    余额差里混着入账和固定转存，按约定把它们扣掉，剩下的才是「花了多少」。
+    """
     known = sorted(balances)
     spent: dict[str, int] = {}
     for index in range(1, len(known)):
         previous, current = known[index - 1], known[index]
-        spent[current] = balances[previous] - balances[current]
+        value = balances[previous] - balances[current]
+        if profile is not None:
+            try:
+                day = date_type.fromisoformat(current)
+            except ValueError:
+                day = None
+            if day is not None and value < 0:
+                value += _income_seen(profile, day)
+                value -= _transfer_seen(profile, day)
+        spent[current] = value
     return spent
+
+
+def _day_of_month(text: str | None) -> int | None:
+    if not text:
+        return None
+    match = _DAY_RE.search(text)
+    if not match:
+        return None
+    day = int(match.group(1))
+    return day if 1 <= day <= 31 else None
+
+
+def _income_seen(profile: Profile, today: date_type, *, day_only: bool = False) -> int:
+    """本月（或当天）已经到账的工资；没到日子就当没有。"""
+    income = parse_amount(profile.agreements.get("月收入")) or 0
+    payday = _day_of_month(profile.agreements.get("工资到账日"))
+    if not income or payday is None:
+        return 0
+    hit = today.day == payday if day_only else today.day >= payday
+    return income if hit else 0
+
+
+def _transfer_seen(profile: Profile, today: date_type, *, day_only: bool = False) -> int:
+    """本月（或当天）已经转去理财账户的固定储蓄；这钱是存起来的，不算花销。"""
+    amount = parse_amount(profile.agreements.get("固定转存")) or 0
+    moveday = _day_of_month(profile.agreements.get("固定转存日")) or _day_of_month(
+        profile.agreements.get("工资到账日")
+    )
+    if not amount or moveday is None:
+        return 0
+    hit = today.day == moveday if day_only else today.day >= moveday
+    return amount if hit else 0
 
 
 def _total(points: list[DayPoint]) -> int | None:

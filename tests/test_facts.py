@@ -300,3 +300,38 @@ def test_trend_survives_invalid_day(tmp_path: Path) -> None:
     trend = summarize_trend(day="not-a-date", history=History(archive, day=DAY), facts=facts)
 
     assert trend.days == []
+
+
+def test_salary_inflow_is_not_spending(tmp_path: Path) -> None:
+    """工资打进这张卡时，余额差会变成负数；按约定把入账扣掉，剩下的才是花销。"""
+    raw = (
+        "- 目标：100 万\n- 当前存款：20 万\n"
+        "- 约定：目标日期 = 2030-12\n- 约定：月收入 = 16831\n"
+        "- 约定：工资到账日 = 每月 11 号\n"
+    )
+    profile = parse_profile(raw, tmp_path / "profile.md")
+    archive = _archive(tmp_path / "archive", {"2026-11-10": 10000})
+    obs = _obs(26831 - 54, as_of="2026-11-12")
+
+    facts = compute(day="2026-11-12", profile=profile, observation=obs, history=History(archive, day="2026-11-12"))
+
+    assert facts.month.spent == 54
+    assert facts.pace.today == 54
+
+
+def test_fixed_transfer_is_saving_not_spending(tmp_path: Path) -> None:
+    """每月固定转去理财账户的钱，是存起来，不该算成花销。"""
+    raw = (
+        "- 目标：100 万\n- 当前存款：20 万\n"
+        "- 约定：目标日期 = 2030-12\n- 约定：月收入 = 16831\n"
+        "- 约定：工资到账日 = 每月 11 号\n"
+        "- 约定：固定转存 = 5000\n- 约定：固定转存日 = 每月 11 号\n"
+    )
+    profile = parse_profile(raw, tmp_path / "profile.md")
+    archive = _archive(tmp_path / "archive", {"2026-11-10": 10000})
+    obs = _obs(26831 - 5000 - 54, as_of="2026-11-12")
+
+    facts = compute(day="2026-11-12", profile=profile, observation=obs, history=History(archive, day="2026-11-12"))
+
+    assert facts.month.spent == 54
+    assert facts.pace.today == 54
